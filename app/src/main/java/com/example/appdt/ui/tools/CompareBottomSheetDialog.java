@@ -6,6 +6,7 @@ import com.google.android.material.button.MaterialButton;
 import com.example.appdt.R;
 import com.example.appdt.model.DocumentModel;
 import com.example.appdt.model.ToolKind;
+import com.example.appdt.utils.DocumentSizeFormatter;
 
 import java.util.List;
 import java.util.Locale;
@@ -21,9 +22,11 @@ public final class CompareBottomSheetDialog extends ToolSheet {
         DocumentModel second = selectedSecondSource(sources);
         addText(binding.toolContent, getString(R.string.ai_send_notice), 13, false);
         String result = getString(R.string.compare_source_line, first.getName(),
-                first.getExtension().toUpperCase(Locale.ROOT), formatSize(first.getSize()))
+                first.getExtension().toUpperCase(Locale.ROOT),
+                DocumentSizeFormatter.format(requireContext(), first.getSize()))
                 + "\n\n" + getString(R.string.compare_source_line, second.getName(),
-                second.getExtension().toUpperCase(Locale.ROOT), formatSize(second.getSize()));
+                second.getExtension().toUpperCase(Locale.ROOT),
+                DocumentSizeFormatter.format(requireContext(), second.getSize()));
         TextView comparison = addText(binding.toolContent, result, 16, false);
         comparison.setId(R.id.compare_result);
         MaterialButton compare = new MaterialButton(requireContext());
@@ -35,10 +38,4 @@ public final class CompareBottomSheetDialog extends ToolSheet {
                 comparison, compare));
     }
 
-    private String formatSize(long size) {
-        if (size < 0) return getString(R.string.unknown_size);
-        if (size < 1024) return getString(R.string.size_bytes, size);
-        if (size < 1024 * 1024) return getString(R.string.size_kb, size / 1024.0);
-        return getString(R.string.size_mb, size / (1024.0 * 1024.0));
-    }
 }

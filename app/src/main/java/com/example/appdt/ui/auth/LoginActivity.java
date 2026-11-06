@@ -2,13 +2,9 @@ package com.example.appdt.ui.auth;
 
 import android.content.Intent;
 import android.os.Bundle;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.view.View;
 
 import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.app.AppCompatDelegate;
 import androidx.lifecycle.ViewModelProvider;
 
 import com.example.appdt.MainActivity;
@@ -17,19 +13,14 @@ import com.example.appdt.databinding.ActivityLoginBinding;
 import com.example.appdt.model.AuthResult;
 import com.example.appdt.model.UserModel;
 import com.example.appdt.repository.AuthRepository;
-import com.example.appdt.repository.SettingsRepository;
 
-public final class LoginActivity extends AppCompatActivity {
+public final class LoginActivity extends BaseAuthActivity {
     private static final String NAVIGATED = "navigated";
     private ActivityLoginBinding binding;
     private AuthViewModel viewModel;
     private boolean navigated;
 
     @Override protected void onCreate(@Nullable Bundle savedInstanceState) {
-        SettingsRepository settings = new SettingsRepository(this);
-        AppCompatDelegate.setDefaultNightMode(settings.getNightMode());
-        setTheme(R.style.Theme_DocuMind);
-        getTheme().applyStyle(settings.getAccent().getThemeOverlay(), true);
         super.onCreate(savedInstanceState);
         binding = ActivityLoginBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
@@ -49,12 +40,11 @@ public final class LoginActivity extends AppCompatActivity {
             intent.putExtra(VerifyOtpActivity.EXTRA_EMAIL, value(binding.loginEmail).trim());
             startActivity(intent);
         });
-        binding.loginEmail.addTextChangedListener(clearError(() ->
-                binding.loginEmailLayout.setError(null)));
-        binding.loginPassword.addTextChangedListener(clearError(() -> {
+        watch(binding.loginEmail, () -> binding.loginEmailLayout.setError(null));
+        watch(binding.loginPassword, () -> {
             binding.loginPasswordLayout.setError(null);
             binding.loginMessage.setVisibility(View.GONE);
-        }));
+        });
         viewModel.getIsLoading().observe(this, loading -> {
             boolean busy = Boolean.TRUE.equals(loading);
             binding.loginProgress.setVisibility(busy ? View.VISIBLE : View.GONE);
@@ -100,29 +90,11 @@ public final class LoginActivity extends AppCompatActivity {
             } else if (result.getError() == AuthResult.Error.INVALID_EMAIL) {
                 binding.loginEmailLayout.setError(getString(R.string.auth_error_email));
             } else {
-                showMessage(result.getError() == AuthResult.Error.INVALID_CREDENTIALS
+                showMessage(binding.loginMessage,
+                        result.getError() == AuthResult.Error.INVALID_CREDENTIALS
                         ? R.string.auth_error_credentials : R.string.auth_error_storage);
             }
         }
-    }
-
-    private void showMessage(int message) {
-        binding.loginMessage.setText(message);
-        binding.loginMessage.setVisibility(View.VISIBLE);
-    }
-
-    private static String value(com.google.android.material.textfield.TextInputEditText field) {
-        return field.getText() == null ? "" : field.getText().toString();
-    }
-
-    private static TextWatcher clearError(Runnable action) {
-        return new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence text, int start,
-                                                    int count, int after) { }
-            @Override public void onTextChanged(CharSequence text, int start,
-                                                int before, int count) { action.run(); }
-            @Override public void afterTextChanged(Editable text) { }
-        };
     }
 
     @Override protected void onSaveInstanceState(Bundle outState) {

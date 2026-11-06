@@ -7,8 +7,6 @@ import android.text.TextWatcher;
 import android.view.View;
 
 import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.app.AppCompatDelegate;
 import androidx.lifecycle.ViewModelProvider;
 
 import com.example.appdt.R;
@@ -16,11 +14,10 @@ import com.example.appdt.databinding.ActivityResetPasswordBinding;
 import com.example.appdt.model.AuthResult;
 import com.example.appdt.model.OtpChallenge;
 import com.example.appdt.repository.AuthRepository;
-import com.example.appdt.repository.SettingsRepository;
 import com.google.android.material.color.MaterialColors;
 
 /** Firebase opens its hosted password change page from the reset email. */
-public final class ResetPasswordActivity extends AppCompatActivity {
+public final class ResetPasswordActivity extends BaseAuthActivity {
     private static final String EMAIL = "reset_email";
     private ActivityResetPasswordBinding binding;
     private AuthViewModel viewModel;
@@ -29,10 +26,6 @@ public final class ResetPasswordActivity extends AppCompatActivity {
     private boolean loading;
 
     @Override protected void onCreate(@Nullable Bundle savedInstanceState) {
-        SettingsRepository settings = new SettingsRepository(this);
-        AppCompatDelegate.setDefaultNightMode(settings.getNightMode());
-        setTheme(R.style.Theme_DocuMind);
-        getTheme().applyStyle(settings.getAccent().getThemeOverlay(), true);
         super.onCreate(savedInstanceState);
         binding = ActivityResetPasswordBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
@@ -74,8 +67,7 @@ public final class ResetPasswordActivity extends AppCompatActivity {
     }
 
     private void requestLink() {
-        email = binding.resetEmail.getText() == null ? ""
-                : binding.resetEmail.getText().toString().trim();
+        email = value(binding.resetEmail).trim();
         binding.resetEmailLayout.setError(null);
         binding.resetMessage.setVisibility(View.GONE);
         if (!AuthRepository.isValidEmail(email)) {

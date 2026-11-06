@@ -17,7 +17,6 @@ import com.google.firebase.auth.UserProfileChangeRequest;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.SetOptions;
 
-import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.HashMap;
 import java.util.Map;
@@ -45,7 +44,7 @@ final class FirebaseAuthGateway {
     AuthResult<OtpChallenge> register(String fullName, String email, String password,
                                       String confirmation) {
         String name = fullName == null ? "" : fullName.trim();
-        String address = normalize(email);
+        String address = AuthRepository.normalizeEmail(email);
         if (name.isEmpty()) return AuthResult.error(AuthResult.Error.NAME_REQUIRED);
         if (!Patterns.EMAIL_ADDRESS.matcher(address).matches())
             return AuthResult.error(AuthResult.Error.INVALID_EMAIL);
@@ -73,7 +72,7 @@ final class FirebaseAuthGateway {
     }
 
     AuthResult<UserModel> login(String email, String password, boolean rememberSession) {
-        String address = normalize(email);
+        String address = AuthRepository.normalizeEmail(email);
         if (!Patterns.EMAIL_ADDRESS.matcher(address).matches())
             return AuthResult.error(AuthResult.Error.INVALID_EMAIL);
         try {
@@ -93,7 +92,7 @@ final class FirebaseAuthGateway {
 
     AuthResult<OtpChallenge> sendCode(String email) {
         FirebaseUser user = auth.getCurrentUser();
-        if (user == null || !normalize(email).equals(normalize(user.getEmail())))
+        if (user == null || !AuthRepository.normalizeEmail(email).equals(AuthRepository.normalizeEmail(user.getEmail())))
             return AuthResult.error(AuthResult.Error.NO_PENDING_REGISTRATION);
         try {
             long expiresAt = System.currentTimeMillis() + EMAIL_RESEND_COOLDOWN_MS;
@@ -101,7 +100,7 @@ final class FirebaseAuthGateway {
                 return AuthResult.error(AuthResult.Error.OTP_LOCKED);
             Tasks.await(user.sendEmailVerification(), 30, TimeUnit.SECONDS);
             deadlines.edit().putLong(user.getUid(), expiresAt).apply();
-            return AuthResult.success(new OtpChallenge(normalize(email), null, expiresAt));
+            return AuthResult.success(new OtpChallenge(AuthRepository.normalizeEmail(email), null, expiresAt));
         } catch (Exception error) {
             return failure(error);
         }
@@ -109,7 +108,7 @@ final class FirebaseAuthGateway {
 
     AuthResult<UserModel> verifyCode(String email, String code) {
         FirebaseUser user = auth.getCurrentUser();
-        if (user == null || !normalize(email).equals(normalize(user.getEmail())))
+        if (user == null || !AuthRepository.normalizeEmail(email).equals(AuthRepository.normalizeEmail(user.getEmail())))
             return AuthResult.error(AuthResult.Error.NO_PENDING_REGISTRATION);
         try {
             Tasks.await(user.reload(), 30, TimeUnit.SECONDS);
@@ -122,7 +121,7 @@ final class FirebaseAuthGateway {
     }
 
     AuthResult<OtpChallenge> requestReset(String email) {
-        String address = normalize(email);
+        String address = AuthRepository.normalizeEmail(email);
         if (!Patterns.EMAIL_ADDRESS.matcher(address).matches())
             return AuthResult.error(AuthResult.Error.INVALID_EMAIL);
         try {
@@ -150,11 +149,11 @@ final class FirebaseAuthGateway {
     }
 
     long resetExpiresAt(String email) {
-        return deadlines.getLong("reset_" + normalize(email), 0L);
+        return deadlines.getLong("reset_" + AuthRepository.normalizeEmail(email), 0L);
     }
 
     long resetLockedUntil(String email) {
-        return deadlines.getLong("reset_lock_" + normalize(email), 0L);
+        return deadlines.getLong("reset_lock_" + AuthRepository.normalizeEmail(email), 0L);
     }
 
     UserModel currentUser() {
@@ -190,7 +189,7 @@ final class FirebaseAuthGateway {
 
     long expiresAt(String email) {
         FirebaseUser user = auth.getCurrentUser();
-        return user != null && normalize(email).equals(normalize(user.getEmail()))
+        return user != null && AuthRepository.normalizeEmail(email).equals(AuthRepository.normalizeEmail(user.getEmail()))
                 ? deadlines.getLong(user.getUid(), 0L) : 0L;
     }
 
@@ -199,10 +198,6 @@ final class FirebaseAuthGateway {
         String email = user.getEmail() == null ? "" : user.getEmail();
         String name = user.getDisplayName() == null ? email : user.getDisplayName();
         return new UserModel(user.getUid(), name, email, "", "", user.isEmailVerified(), createdAt);
-    }
-
-    private static String normalize(String email) {
-        return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
     }
 
     private static AuthResult.Error map(Exception error) {

@@ -433,7 +433,7 @@ public final class AuthRepository {
         return upper && lower && digit;
     }
 
-    private static String normalizeEmail(String email) {
+    static String normalizeEmail(String email) {
         return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
     }
 

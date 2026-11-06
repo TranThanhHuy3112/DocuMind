@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.appdt.R;
+import com.example.appdt.utils.DocumentSizeFormatter;
 import com.example.appdt.databinding.ItemDocumentBinding;
 import com.example.appdt.model.DocumentModel;
 import com.example.appdt.utils.DensityStyler;
@@ -58,7 +59,7 @@ public final class DocumentAdapter extends ListAdapter<DocumentModel, DocumentAd
         ItemDocumentBinding binding = holder.binding;
         binding.documentName.setText(document.getName());
         binding.documentType.setText(document.getExtension().toUpperCase(Locale.ROOT));
-        binding.documentSize.setText(formatSize(context, document.getSize()));
+        binding.documentSize.setText(DocumentSizeFormatter.format(context, document.getSize()));
         binding.documentProgress.setProgressCompat(document.getProgress(), true);
         if (document.isFailed()) {
             binding.documentStatus.setText(R.string.document_failed);
@@ -74,14 +75,6 @@ public final class DocumentAdapter extends ListAdapter<DocumentModel, DocumentAd
         binding.deleteDocument.setContentDescription(context.getString(
                 R.string.delete_named_document, document.getName()));
         binding.deleteDocument.setOnClickListener(view -> deleteListener.onDelete(document));
-    }
-
-    private static String formatSize(Context context, long bytes) {
-        if (bytes < 0) return context.getString(R.string.unknown_size);
-        if (bytes < 1024) return context.getString(R.string.size_bytes, bytes);
-        if (bytes < 1024 * 1024) return context.getString(R.string.size_kb,
-                bytes / 1024.0);
-        return context.getString(R.string.size_mb, bytes / (1024.0 * 1024));
     }
 
     static final class Holder extends RecyclerView.ViewHolder {

@@ -2,13 +2,9 @@ package com.example.appdt.ui.auth;
 
 import android.content.Intent;
 import android.os.Bundle;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.view.View;
 
 import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.app.AppCompatDelegate;
 import androidx.lifecycle.ViewModelProvider;
 
 import com.example.appdt.R;
@@ -16,21 +12,15 @@ import com.example.appdt.databinding.ActivityRegisterBinding;
 import com.example.appdt.model.AuthResult;
 import com.example.appdt.model.OtpChallenge;
 import com.example.appdt.repository.AuthRepository;
-import com.example.appdt.repository.SettingsRepository;
-import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
-public final class RegisterActivity extends AppCompatActivity {
+public final class RegisterActivity extends BaseAuthActivity {
     private static final String NAVIGATED = "navigated_to_verify";
     private ActivityRegisterBinding binding;
     private AuthViewModel viewModel;
     private boolean navigated;
 
     @Override protected void onCreate(@Nullable Bundle savedInstanceState) {
-        SettingsRepository settings = new SettingsRepository(this);
-        AppCompatDelegate.setDefaultNightMode(settings.getNightMode());
-        setTheme(R.style.Theme_DocuMind);
-        getTheme().applyStyle(settings.getAccent().getThemeOverlay(), true);
         super.onCreate(savedInstanceState);
         binding = ActivityRegisterBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
@@ -135,26 +125,11 @@ public final class RegisterActivity extends AppCompatActivity {
                 binding.registerEmailLayout.setError(getString(R.string.auth_error_email_exists));
                 break;
             default:
-                binding.registerMessage.setText(error == AuthResult.Error.OTP_LOCKED
+                showMessage(binding.registerMessage, error == AuthResult.Error.OTP_LOCKED
                         ? R.string.auth_error_otp_locked : error == AuthResult.Error.FIREBASE_SETUP
                         ? R.string.auth_error_firebase_setup : R.string.auth_error_storage);
-                binding.registerMessage.setVisibility(View.VISIBLE);
                 break;
         }
-    }
-
-    private static String value(TextInputEditText field) {
-        return field.getText() == null ? "" : field.getText().toString();
-    }
-
-    private static void watch(TextInputEditText field, Runnable changed) {
-        field.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence text, int start,
-                                                    int count, int after) { }
-            @Override public void onTextChanged(CharSequence text, int start,
-                                                int before, int count) { changed.run(); }
-            @Override public void afterTextChanged(Editable text) { }
-        });
     }
 
     @Override protected void onSaveInstanceState(Bundle outState) {

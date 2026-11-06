@@ -61,25 +61,6 @@ public final class WorkspaceRepository {
         recentActivities.setValue(localData.loadActivities());
     }
 
-    private synchronized void restoreRemote(DocumentModel document) {
-        List<DocumentModel> existing = documents.getValue();
-        if (existing == null) return;
-        for (int index = 0; index < existing.size(); index++) {
-            if (existing.get(index).getId().equals(document.getId())) {
-                List<DocumentModel> updated = new ArrayList<>(existing);
-                updated.set(index, document);
-                documents.setValue(Collections.unmodifiableList(updated));
-                saveDocuments(updated);
-                return;
-            }
-        }
-        if (existing.size() >= MAX_DOCUMENTS) return;
-        List<DocumentModel> updated = new ArrayList<>(existing);
-        updated.add(document);
-        documents.setValue(Collections.unmodifiableList(updated));
-        saveDocuments(updated);
-    }
-
     public synchronized ContentResolver getContentResolver() {
         return appContext == null ? null : appContext.getContentResolver();
     }
