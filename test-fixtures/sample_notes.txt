@@ -1,0 +1,2 @@
+DocuMind sample notes
+This file verifies that a selected text document reaches 100 percent after it is read.

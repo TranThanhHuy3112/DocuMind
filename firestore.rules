@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    function verified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function validComment(comment) {
+      return comment is map
+        && comment.keys().hasOnly(['id', 'authorUid', 'author', 'content', 'createdAt'])
+        && comment.id is string && comment.id.size() > 0 && comment.id.size() <= 80
+        && comment.authorUid == request.auth.uid
+        && comment.author == request.auth.token.name
+        && comment.content is string && comment.content.size() > 0
+        && comment.content.size() <= 500
+        && comment.createdAt is int;
+    }
+    match /communityPosts/{postId} {
+      allow read: if verified();
+      allow create: if verified()
+        && request.resource.data.keys().hasOnly(['authorUid', 'author', 'title',
+          'category', 'content', 'createdAt', 'comments', 'voters'])
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.author == request.auth.token.name
+        && postId.matches(request.auth.uid + '_[a-f0-9-]{36}')
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.content is string
+        && request.resource.data.content.size() > 0
+        && request.resource.data.content.size() <= 2000
+        && request.resource.data.category in ['STUDY', 'DATA', 'WORK', 'OTHER']
+        && request.resource.data.createdAt is int
+        && request.resource.data.comments == []
+        && request.resource.data.voters == [];
+      allow update: if verified() && (
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comments'])
+          && request.resource.data.comments is list
+          && resource.data.comments is list
+          && request.resource.data.comments.size() == resource.data.comments.size() + 1
+          && request.resource.data.comments.size() <= 100
+          && request.resource.data.comments.hasAll(resource.data.comments)
+          && validComment(request.resource.data.comments[resource.data.comments.size()]))
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voters'])
+          && request.resource.data.voters is list
+          && resource.data.voters is list
+          && request.resource.data.voters.size() == resource.data.voters.size() + 1
+          && request.resource.data.voters.size() <= 1000
+          && request.resource.data.voters.hasAll(resource.data.voters)
+          && !resource.data.voters.hasAny([request.auth.uid])
+          && request.resource.data.voters.hasAny([request.auth.uid])));
+      allow delete: if verified() && resource.data.authorUid == request.auth.uid;
+    }
+    match /users/{uid} {
+      allow read, write: if owner(uid);
+      match /documents/{documentId} {
+        allow read, write: if owner(uid) && request.auth.token.email_verified == true;
+      }
+    }
+    match /_otpChallenges/{uid} {
+      allow read, write: if false;
+    }
+    match /_passwordResetChallenges/{id} {
+      allow read, write: if false;
+    }
+    match /_otpRequestLimits/{id} {
+      allow read, write: if false;
+    }
+  }
+}

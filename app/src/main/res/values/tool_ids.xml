@@ -1,0 +1,12 @@
+<resources>
+    <item name="chat_question" type="id" />
+    <item name="chat_send" type="id" />
+    <item name="chat_messages" type="id" />
+    <item name="analysis_chart" type="id" />
+    <item name="analysis_summary" type="id" />
+    <item name="transcript_copy" type="id" />
+    <item name="transcript_text" type="id" />
+    <item name="compare_result" type="id" />
+    <item name="draft_result" type="id" />
+    <item name="draft_copy" type="id" />
+</resources>
