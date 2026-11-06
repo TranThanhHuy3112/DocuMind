@@ -54,14 +54,12 @@ npx.cmd --yes firebase-tools@latest deploy --project <firebase-project-id> --onl
 
 ## Kiểm thử đã thực hiện
 
-- Build debug, unit test, Android Lint và **30/30 Android instrumented test** đã qua trên bản hiện tại (06/11/2026).
+- Build debug, unit test, Android Lint đã qua trên bản hiện tại (06/11/2026).
 - Đăng ký/xác minh email, đặt lại mật khẩu, hỏi AI từ file TXT và đăng/xóa bài cộng đồng đã được thử với dịch vụ thật trên máy ảo.
-- Bộ instrumented test cần máy ảo hoặc thiết bị Android; lần chạy hiện tại dùng AVD `Medium_Phone`.
 
 Báo cáo cục bộ sau khi chạy test: `app/build/reports/androidTests/connected/debug/index.html` và `app/build/reports/lint-results-debug.html`.
 
 ## Ghi chú
 
-- Repo nhóm giữ `google-services.json` để mọi người build cùng Firebase project. Không commit khóa ký app, mật khẩu hoặc file môi trường; `.gitignore` đã loại các file này. Trước khi đổi repo sang công khai, kiểm tra giới hạn API key và App Check.
+- Repo nhóm giữ `google-services.json` để mọi người build cùng Firebase project. Không commit khóa ký app, mật khẩu hoặc file môi trường; `.gitignore` đã loại các file này.
 - Mỗi tính năng nên làm trên một nhánh riêng, gửi pull request có mô tả thay đổi và cách đã kiểm thử. Giữ rules cùng thay đổi tính năng Firestore.
-- Các giới hạn của gói miễn phí có thể thay đổi; kiểm tra tài liệu [Firebase AI Logic](https://firebase.google.com/docs/ai-logic/get-started) và [Firebase Authentication](https://firebase.google.com/docs/auth/android/manage-users) khi cấu hình project mới.
