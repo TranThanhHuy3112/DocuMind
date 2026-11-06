@@ -60,7 +60,7 @@ npx.cmd --yes firebase-tools@latest deploy --project <firebase-project-id> --onl
 
 Báo cáo cục bộ sau khi chạy test: `app/build/reports/androidTests/connected/debug/index.html` và `app/build/reports/lint-results-debug.html`.
 
-## Ghi chú cho người đóng góp
+## Ghi chú
 
 - Repo nhóm giữ `google-services.json` để mọi người build cùng Firebase project. Không commit khóa ký app, mật khẩu hoặc file môi trường; `.gitignore` đã loại các file này. Trước khi đổi repo sang công khai, kiểm tra giới hạn API key và App Check.
 - Mỗi tính năng nên làm trên một nhánh riêng, gửi pull request có mô tả thay đổi và cách đã kiểm thử. Giữ rules cùng thay đổi tính năng Firestore.
