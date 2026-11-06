@@ -54,9 +54,9 @@ npx.cmd --yes firebase-tools@latest deploy --project <firebase-project-id> --onl
 
 ## Kiểm thử đã thực hiện
 
-- Build debug, unit test và Android Lint đã qua trên bản chuẩn bị commit. Bộ **30/30 Android instrumented test** đã qua trong lần chạy đầy đủ trước đó.
+- Build debug, unit test, Android Lint và **30/30 Android instrumented test** đã qua trên bản hiện tại (06/11/2026).
 - Đăng ký/xác minh email, đặt lại mật khẩu, hỏi AI từ file TXT và đăng/xóa bài cộng đồng đã được thử với dịch vụ thật trên máy ảo.
-- Có chỉnh sửa nhỏ sau lần chạy instrumented test đầy đủ; cần chạy lại bài kiểm thử trên máy ảo trước khi phát hành.
+- Bộ instrumented test cần máy ảo hoặc thiết bị Android; lần chạy hiện tại dùng AVD `Medium_Phone`.
 
 Báo cáo cục bộ sau khi chạy test: `app/build/reports/androidTests/connected/debug/index.html` và `app/build/reports/lint-results-debug.html`.
 
