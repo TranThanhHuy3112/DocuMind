@@ -20,7 +20,3 @@ Danh sách tài liệu được lưu trên thiết bị, còn file gốc vẫn n
 
 1. Mở repo bằng Android Studio, cài Android SDK 37 và dùng JDK đi kèm Android Studio.
 2. Chờ Gradle đồng bộ rồi chạy cấu hình `app` trên máy ảo hoặc điện thoại Android.
-
-Repo có sẵn cấu hình Firebase dùng chung của nhóm trong `app/google-services.json`. Muốn quản lý Authentication, Firestore hoặc AI Logic trên Firebase Console, thành viên cần được chủ project cấp quyền.
-
-APK debug sau khi build nằm ở `app/build/outputs/apk/debug/app-debug.apk`.
