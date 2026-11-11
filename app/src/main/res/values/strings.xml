@@ -22,14 +22,10 @@
     <string name="account_title">Không gian của bạn</string>
     <string name="account_description">Quản lý giao diện, tài khoản và dữ liệu đã lưu.</string>
     <string name="account_eyebrow">HỒ SƠ CỦA BẠN</string>
-    <string name="account_profile_name">Bạn</string>
-    <string name="account_profile_note">Chưa đăng nhập</string>
     <string name="account_profile_verified">Email đã được xác minh</string>
     <string name="account_logout">Đăng xuất</string>
     <string name="account_avatar_description">Ảnh đại diện của %1$s</string>
     <string name="main_signed_in_as">AI DOCUMENT WORKSPACE · %1$s</string>
-    <string name="account_create_account">Tạo tài khoản</string>
-    <string name="account_sign_in">Đăng nhập</string>
     <string name="auth_register_title">Tạo tài khoản mới</string>
     <string name="auth_register_subtitle">Tạo tài khoản DocuMind để bắt đầu.</string>
     <string name="auth_full_name">Họ và tên</string>
@@ -68,7 +64,6 @@
     <string name="auth_reset_request">Gửi liên kết đặt lại</string>
     <string name="auth_reset_link_sent">Nếu email này có tài khoản, liên kết đặt lại mật khẩu đã được gửi. Hãy kiểm tra cả thư rác.</string>
     <string name="auth_reset_link_wait">Có thể gửi lại sau %1$ds</string>
-    <string name="auth_error_firebase_setup">Chưa thể gửi email. Hãy kiểm tra kết nối và thử lại.</string>
     <string name="cloud_profile_error">Không thể lưu hồ sơ trực tuyến. Tài khoản vẫn được tạo.</string>
     <string name="account_document_count">%1$d tài liệu</string>
     <string name="account_post_count">%1$d bài của bạn</string>

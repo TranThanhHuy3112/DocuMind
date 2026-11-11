@@ -22,6 +22,7 @@ public final class ResetPasswordActivity extends BaseAuthActivity {
     private ActivityResetPasswordBinding binding;
     private AuthViewModel viewModel;
     private String email;
+    private String lastCheckedEmail = "";
     private long secondsLeft;
     private boolean loading;
 
@@ -35,9 +36,14 @@ public final class ResetPasswordActivity extends BaseAuthActivity {
                 : savedInstanceState.getString(EMAIL);
         if (email == null) email = "";
         binding.resetEmail.setText(email);
+        if (AuthRepository.isValidEmail(email)) {
+            lastCheckedEmail = email;
+            viewModel.resumeResetCountdown(email);
+        }
         binding.resetRequest.setOnClickListener(ignored -> requestLink());
         binding.resetBack.setOnClickListener(ignored -> {
-            Intent intent = new Intent(this, LoginActivity.class);
+            Intent intent = new Intent(this, LoginActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             intent.putExtra(VerifyOtpActivity.EXTRA_EMAIL, email);
             startActivity(intent);
             finish();
@@ -50,7 +56,10 @@ public final class ResetPasswordActivity extends BaseAuthActivity {
                 binding.resetEmailLayout.setError(null);
                 binding.resetMessage.setVisibility(View.GONE);
                 email = text.toString().trim();
-                viewModel.resumeResetCountdown(email);
+                if (AuthRepository.isValidEmail(email) && !email.equals(lastCheckedEmail)) {
+                    lastCheckedEmail = email;
+                    viewModel.resumeResetCountdown(email);
+                }
             }
             @Override public void afterTextChanged(Editable text) { }
         });

@@ -39,30 +39,32 @@ public final class WorkspaceRepository {
         return INSTANCE;
     }
 
-    public synchronized void initialize(Context context) {
-        if (localData != null) return;
-        appContext = context.getApplicationContext();
-        localData = new LocalDataStore(appContext);
-        List<DocumentModel> savedDocuments = localData.loadDocuments();
-        for (DocumentModel document : savedDocuments) restoredIds.add(document.getId());
-        documents.setValue(savedDocuments);
-        recentActivities.setValue(localData.loadActivities());
-    }
-
     public synchronized void initialize(Context context, String uid) {
         if (uid.equals(activeUid)) return;
         appContext = context.getApplicationContext();
         activeUid = uid;
         restoredIds.clear();
-        localData = new LocalDataStore(appContext, "documind_local_data_" + uid);
+        localData = LocalDataStore.forAccount(appContext, uid);
         List<DocumentModel> saved = localData.loadDocuments();
         for (DocumentModel document : saved) restoredIds.add(document.getId());
         documents.setValue(saved);
         recentActivities.setValue(localData.loadActivities());
     }
 
+    public synchronized void clearSession() {
+        activeUid = null;
+        localData = null;
+        restoredIds.clear();
+        documents.setValue(Collections.emptyList());
+        recentActivities.setValue(Collections.emptyList());
+    }
+
     public synchronized ContentResolver getContentResolver() {
         return appContext == null ? null : appContext.getContentResolver();
+    }
+
+    public synchronized Context getAppContext() {
+        return appContext;
     }
 
     public LiveData<List<DocumentModel>> getDocuments() {
@@ -144,19 +146,6 @@ public final class WorkspaceRepository {
                 restoredIds.remove(id);
                 saveDocuments(updated);
                 addActivity("Đã xóa tài liệu", document.getName());
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public synchronized boolean hasReadyDocument() {
-        List<DocumentModel> current = documents.getValue();
-        if (current == null) {
-            return false;
-        }
-        for (DocumentModel document : current) {
-            if (document.isReady()) {
                 return true;
             }
         }

@@ -66,7 +66,7 @@ public final class LoginActivity extends BaseAuthActivity {
             binding.loginEmail.requestFocus();
             return;
         }
-        if (password.isEmpty()) {
+        if (password.isEmpty() || password.length() > AuthRepository.MAX_PASSWORD_LENGTH) {
             binding.loginPasswordLayout.setError(getString(R.string.auth_error_credentials));
             binding.loginPassword.requestFocus();
             return;
@@ -97,14 +97,21 @@ public final class LoginActivity extends BaseAuthActivity {
         }
     }
 
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (binding == null || intent == null) return;
+        String emailExtra = intent.getStringExtra(VerifyOtpActivity.EXTRA_EMAIL);
+        if (emailExtra != null) {
+            binding.loginEmail.setText(emailExtra);
+            binding.loginEmailLayout.setError(null);
+            binding.loginMessage.setVisibility(View.GONE);
+        }
+    }
+
     @Override protected void onSaveInstanceState(Bundle outState) {
         outState.putBoolean(NAVIGATED, navigated);
         super.onSaveInstanceState(outState);
-    }
-
-    @Override protected void onStop() {
-        viewModel.stopCountdown();
-        super.onStop();
     }
 
     @Override protected void onDestroy() {
