@@ -1,8 +1,5 @@
 package com.example.appdt.ui.tools;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -10,7 +7,6 @@ import com.example.appdt.R;
 import com.example.appdt.model.DocumentModel;
 import com.example.appdt.model.ToolKind;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.snackbar.Snackbar;
 
 import java.util.List;
 import java.util.Collections;
@@ -27,9 +23,11 @@ public final class GenerateDraftDialog extends ToolSheet {
         MaterialButton outline = new MaterialButton(requireContext(), null,
                 com.google.android.material.R.attr.materialButtonOutlinedStyle);
         outline.setText(R.string.draft_outline);
+        outline.setFilterTouchesWhenObscured(true);
         MaterialButton report = new MaterialButton(requireContext(), null,
                 com.google.android.material.R.attr.materialButtonOutlinedStyle);
         report.setText(R.string.draft_report);
+        report.setFilterTouchesWhenObscured(true);
         LinearLayout choices = new LinearLayout(requireContext());
         choices.setOrientation(LinearLayout.HORIZONTAL);
         choices.addView(outline, new LinearLayout.LayoutParams(0,
@@ -44,20 +42,28 @@ public final class GenerateDraftDialog extends ToolSheet {
         copy.setId(R.id.draft_copy);
         copy.setText(R.string.draft_copy);
         copy.setEnabled(false);
-        outline.setOnClickListener(view -> askAi(Collections.singletonList(source),
-                "Tạo dàn ý có cấu trúc từ nội dung tệp, nêu các ý chính và dẫn tên nguồn.",
-                body, outline, () -> copy.setEnabled(true)));
-        report.setOnClickListener(view -> askAi(Collections.singletonList(source),
-                "Viết bản nháp báo cáo ngắn từ nội dung tệp gồm tóm tắt, phân tích, kết luận; "
-                        + "giữ nguyên số liệu và chỉ ra phần còn thiếu dữ liệu.", body, report,
-                () -> copy.setEnabled(true)));
-        binding.toolActions.addView(copy);
-        copy.setOnClickListener(view -> {
-            ClipboardManager clipboard = (ClipboardManager) requireContext()
-                    .getSystemService(Context.CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(ClipData.newPlainText(
-                    getString(R.string.draft_title), body.getText()));
-            Snackbar.make(binding.getRoot(), R.string.draft_copied, Snackbar.LENGTH_SHORT).show();
+        copy.setFilterTouchesWhenObscured(true);
+        Runnable restoreChoices = () -> {
+            outline.setEnabled(true);
+            report.setEnabled(true);
+        };
+        outline.setOnClickListener(view -> {
+            copy.setEnabled(false);
+            report.setEnabled(false);
+            askAi(Collections.singletonList(source),
+                    "Tạo dàn ý có cấu trúc từ nội dung tệp, nêu các ý chính và dẫn tên nguồn.",
+                    body, outline, () -> copy.setEnabled(true), restoreChoices);
         });
+        report.setOnClickListener(view -> {
+            copy.setEnabled(false);
+            outline.setEnabled(false);
+            askAi(Collections.singletonList(source),
+                    "Viết bản nháp báo cáo ngắn từ nội dung tệp gồm tóm tắt, phân tích, kết luận; "
+                            + "giữ nguyên số liệu và chỉ ra phần còn thiếu dữ liệu.", body, report,
+                    () -> copy.setEnabled(true), restoreChoices);
+        });
+        binding.toolActions.addView(copy);
+        copy.setOnClickListener(view ->
+                copySensitiveText(R.string.draft_title, body.getText(), R.string.draft_copied));
     }
 }

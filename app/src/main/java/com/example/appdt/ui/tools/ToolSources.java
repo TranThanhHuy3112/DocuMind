@@ -1,11 +1,12 @@
 package com.example.appdt.ui.tools;
 
+import com.example.appdt.model.DocumentCategory;
 import com.example.appdt.model.DocumentModel;
 import com.example.appdt.model.ToolKind;
+import com.example.appdt.utils.DocumentPicker;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 public final class ToolSources {
     private ToolSources() { }
@@ -14,8 +15,8 @@ public final class ToolSources {
         List<DocumentModel> result = new ArrayList<>();
         if (documents == null) return result;
         for (DocumentModel document : documents) {
-            if (!document.isReady()) continue;
-            String extension = document.getExtension().toLowerCase(Locale.ROOT);
+            if (!document.isReady() || DocumentPicker.isBlockedPath(document.getPath())) continue;
+            String extension = DocumentCategory.canonicalExtension(document);
             boolean spreadsheet = extension.equals("csv") || extension.equals("xlsx");
             boolean media = extension.equals("mp4") || extension.equals("mov")
                     || extension.equals("mp3") || extension.equals("wav")

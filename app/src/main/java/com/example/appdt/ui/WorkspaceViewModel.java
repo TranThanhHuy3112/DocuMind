@@ -5,7 +5,9 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 
+import androidx.annotation.Nullable;
 import androidx.lifecycle.LiveData;
+import androidx.lifecycle.MutableLiveData;
 import androidx.lifecycle.SavedStateHandle;
 import androidx.lifecycle.ViewModel;
 import com.example.appdt.R;
@@ -13,6 +15,7 @@ import com.example.appdt.model.DocumentModel;
 import com.example.appdt.model.RecentActivityModel;
 import com.example.appdt.model.ToolKind;
 import com.example.appdt.repository.WorkspaceRepository;
+import com.example.appdt.utils.DocumentPicker;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -25,11 +28,25 @@ import java.util.concurrent.Future;
 
 public class WorkspaceViewModel extends ViewModel {
     private static final String SELECTED_TAB = "selected_tab";
+    private static final long MAX_READ_BYTES = 100L * 1024 * 1024;
     private final SavedStateHandle state;
     private final WorkspaceRepository repository;
     private final ExecutorService documentExecutor = Executors.newFixedThreadPool(3);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Map<String, Future<?>> documentJobs = new ConcurrentHashMap<>();
+    private final MutableLiveData<ImportFeedback> importFeedback = new MutableLiveData<>();
+
+    public static final class ImportFeedback {
+        public final int messageRes;
+        @Nullable public final String documentName;
+        public final boolean shortDuration;
+
+        ImportFeedback(int messageRes, @Nullable String documentName, boolean shortDuration) {
+            this.messageRes = messageRes;
+            this.documentName = documentName;
+            this.shortDuration = shortDuration;
+        }
+    }
 
     public WorkspaceViewModel(SavedStateHandle state) {
         this.state = state;
@@ -75,12 +92,54 @@ public class WorkspaceViewModel extends ViewModel {
         return result;
     }
 
-    public boolean hasReadyDocument() {
-        return repository.hasReadyDocument();
-    }
-
     public boolean hasReadyDocumentFor(ToolKind tool) {
         return repository.hasReadyDocumentFor(tool);
+    }
+
+    public LiveData<ImportFeedback> getImportFeedback() {
+        return importFeedback;
+    }
+
+    public void clearImportFeedback() {
+        importFeedback.setValue(null);
+    }
+
+    public void importDocuments(List<Uri> uris, ContentResolver resolver, String unnamedDocument) {
+        if (uris == null || uris.isEmpty() || documentExecutor.isShutdown()) return;
+        documentExecutor.execute(() -> {
+            for (Uri uri : uris) {
+                if (Thread.currentThread().isInterrupted()) return;
+                if (!DocumentPicker.isAllowedPickedUri(uri)) {
+                    mainHandler.post(() -> {
+                        if (documentExecutor.isShutdown()) return;
+                        importFeedback.setValue(
+                                new ImportFeedback(R.string.unsupported_document, null, false));
+                    });
+                    continue;
+                }
+                DocumentModel document = DocumentPicker.readMetadata(resolver, uri, unnamedDocument);
+                if (Thread.currentThread().isInterrupted()) return;
+                mainHandler.post(() -> {
+                    if (documentExecutor.isShutdown()) return;
+                    if (!DocumentPicker.isSupported(document)) {
+                        importFeedback.setValue(
+                                new ImportFeedback(R.string.unsupported_document, null, false));
+                        return;
+                    }
+                    WorkspaceRepository.AddResult result = addDocument(document, resolver);
+                    if (result == WorkspaceRepository.AddResult.ADDED) {
+                        DocumentPicker.keepReadPermission(resolver, Uri.parse(document.getPath()));
+                        importFeedback.setValue(new ImportFeedback(
+                                R.string.document_added, document.getName(), true));
+                    } else {
+                        importFeedback.setValue(new ImportFeedback(
+                                result == WorkspaceRepository.AddResult.DUPLICATE
+                                        ? R.string.duplicate_document : R.string.workspace_full,
+                                null, false));
+                    }
+                });
+            }
+        });
     }
 
     public void removeDocument(String id) {
@@ -91,7 +150,12 @@ public class WorkspaceViewModel extends ViewModel {
 
     private void readDocument(DocumentModel document, ContentResolver resolver) {
         String id = document.getId();
-        try (InputStream input = resolver.openInputStream(Uri.parse(document.getPath()))) {
+        Uri uri = Uri.parse(document.getPath());
+        if (!DocumentPicker.isReadableUri(repository.getAppContext(), uri)) {
+            mainHandler.post(() -> repository.markFailed(id));
+            return;
+        }
+        try (InputStream input = resolver.openInputStream(uri)) {
             if (input == null) throw new IOException("Document provider returned no stream");
             byte[] buffer = new byte[64 * 1024];
             long read = 0L;
@@ -100,6 +164,9 @@ public class WorkspaceViewModel extends ViewModel {
             while ((count = input.read(buffer)) != -1) {
                 if (Thread.currentThread().isInterrupted()) return;
                 read += count;
+                if (read > MAX_READ_BYTES) {
+                    throw new IOException("Document stream exceeds maximum size");
+                }
                 if (document.getSize() > 0L) {
                     int progress = Math.min(90,
                             (int) Math.round((double) read * 90 / document.getSize()));
@@ -117,6 +184,8 @@ public class WorkspaceViewModel extends ViewModel {
             mainHandler.post(() -> repository.markFailed(id));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+        } finally {
+            documentJobs.remove(id);
         }
     }
 
@@ -126,9 +195,8 @@ public class WorkspaceViewModel extends ViewModel {
 
     @Override
     protected void onCleared() {
-        for (Map.Entry<String, Future<?>> entry : documentJobs.entrySet()) {
-            entry.getValue().cancel(true);
-            repository.markFailed(entry.getKey());
+        for (Future<?> job : documentJobs.values()) {
+            job.cancel(true);
         }
         documentJobs.clear();
         documentExecutor.shutdownNow();

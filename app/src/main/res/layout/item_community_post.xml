@@ -74,6 +74,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:filterTouchesWhenObscured="true"
             android:gravity="start|center_vertical"
             android:textAllCaps="false"
             android:visibility="gone"
@@ -110,6 +111,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="0.85"
+                android:filterTouchesWhenObscured="true"
                 android:minWidth="0dp"
                 android:text="@string/community_share"
                 android:textAllCaps="false"
@@ -122,6 +124,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="end"
+            android:filterTouchesWhenObscured="true"
             android:text="@string/community_delete_post"
             android:visibility="gone" />
 
@@ -182,6 +185,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:layout_marginStart="7dp"
+                android:filterTouchesWhenObscured="true"
                 android:minWidth="58dp"
                 android:text="@string/community_send"
                 android:textAllCaps="false"

@@ -9,6 +9,7 @@ import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
@@ -48,10 +49,28 @@ public final class CommunityPostAdapter extends
 
     private final Actions actions;
     private final Map<String, String> commentDrafts = new HashMap<>();
+    private String cachedVoterId = "";
 
     public CommunityPostAdapter(Actions actions) {
         super(DIFF);
         this.actions = actions;
+    }
+
+    @Override public void submitList(@Nullable java.util.List<PostModel> list) {
+        submitList(list, null);
+    }
+
+    @Override public void submitList(@Nullable java.util.List<PostModel> list,
+                                     @Nullable Runnable commitCallback) {
+        cachedVoterId = CommunityRepository.getInstance().voterId();
+        if (list == null) {
+            commentDrafts.clear();
+        } else {
+            java.util.Set<String> activeIds = new java.util.HashSet<>(list.size());
+            for (PostModel post : list) activeIds.add(post.getId());
+            commentDrafts.keySet().retainAll(activeIds);
+        }
+        super.submitList(list, commitCallback);
     }
 
     @NonNull @Override
@@ -68,14 +87,50 @@ public final class CommunityPostAdapter extends
 
     public final class PostHolder extends RecyclerView.ViewHolder {
         private final ItemCommunityPostBinding binding;
-        private TextWatcher watcher;
+        private PostModel boundPost;
+        private boolean bindingDraft;
 
         PostHolder(ItemCommunityPostBinding binding) {
             super(binding.getRoot());
             this.binding = binding;
+            binding.postCommentInput.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence text, int start,
+                                                        int count, int after) { }
+                @Override public void onTextChanged(CharSequence text, int start,
+                                                    int before, int count) {
+                    if (!bindingDraft && boundPost != null) {
+                        commentDrafts.put(boundPost.getId(), text.toString());
+                    }
+                }
+                @Override public void afterTextChanged(Editable text) { }
+            });
+            binding.postCommentsAction.setOnClickListener(view -> {
+                binding.postCommentInput.requestFocus();
+                InputMethodManager keyboard = (InputMethodManager) view.getContext()
+                        .getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (keyboard != null) {
+                    keyboard.showSoftInput(binding.postCommentInput, InputMethodManager.SHOW_IMPLICIT);
+                }
+            });
+            binding.postCommentSend.setOnClickListener(view -> {
+                if (boundPost == null) return;
+                String text = binding.postCommentInput.getText() == null ? ""
+                        : binding.postCommentInput.getText().toString().trim();
+                if (text.isEmpty()) {
+                    binding.postCommentInput.setError(
+                            view.getContext().getString(R.string.community_comment_required));
+                    return;
+                }
+                if (actions.onComment(boundPost, text)) {
+                    binding.postCommentInput.setText("");
+                    commentDrafts.remove(boundPost.getId());
+                    binding.postCommentInput.clearFocus();
+                }
+            });
         }
 
         void bind(PostModel post) {
+            boundPost = post;
             Context context = binding.getRoot().getContext();
             binding.postCategory.setText(post.getCategory().getLabel());
             binding.postTime.setText(relativeTime(context, post.getCreatedAt()));
@@ -85,71 +140,49 @@ public final class CommunityPostAdapter extends
             binding.postContent.setText(post.getContent());
             boolean hasAttachment = post.getAttachment() != null;
             binding.postAttachment.setVisibility(hasAttachment ? View.VISIBLE : View.GONE);
-            if (hasAttachment) {
-                binding.postAttachment.setText(context.getString(
-                        R.string.community_attachment_name, post.getAttachment().getName()));
-                binding.postAttachment.setOnClickListener(view -> actions.onAttachment(post));
-            } else {
-                binding.postAttachment.setOnClickListener(null);
-            }
+            binding.postAttachment.setText(hasAttachment ? context.getString(
+                    R.string.community_attachment_name, post.getAttachment().getName()) : "");
+            binding.postAttachment.setOnClickListener(hasAttachment ? view -> actions.onAttachment(post) : null);
             binding.postCommentsAction.setText(context.getString(
                     R.string.community_comment_count, post.getComments().size()));
-            binding.postCommentsAction.setOnClickListener(view -> {
-                binding.postCommentInput.requestFocus();
-                InputMethodManager keyboard = (InputMethodManager) context
-                        .getSystemService(Context.INPUT_METHOD_SERVICE);
-                keyboard.showSoftInput(binding.postCommentInput, InputMethodManager.SHOW_IMPLICIT);
-            });
             binding.postHelpful.setText(context.getString(R.string.community_helpful_count,
                     post.getHelpfulCount()));
-            boolean voted = post.hasVoted(CommunityRepository.getInstance().voterId());
+            String voterId = cachedVoterId.isEmpty()
+                    ? CommunityRepository.getInstance().voterId() : cachedVoterId;
+            boolean voted = post.hasVoted(voterId);
             binding.postHelpful.setEnabled(!voted);
             binding.postHelpful.setContentDescription(voted
                     ? context.getString(R.string.community_already_helpful)
                     : binding.postHelpful.getText());
             binding.postHelpful.setOnClickListener(view -> actions.onHelpful(post));
             binding.postShare.setOnClickListener(view -> actions.onShare(post));
-            boolean own = post.getAuthor().equals("Bạn");
+            boolean own = post.isOwn();
             binding.postDelete.setVisibility(own ? View.VISIBLE : View.GONE);
             binding.postDelete.setOnClickListener(own ? view -> actions.onDelete(post) : null);
 
-            binding.postCommentsList.removeAllViews();
-            binding.postCommentsEmpty.setVisibility(post.getComments().isEmpty()
-                    ? View.VISIBLE : View.GONE);
-            for (CommentModel comment : post.getComments()) {
-                ItemCommunityCommentBinding item = ItemCommunityCommentBinding.inflate(
-                        LayoutInflater.from(context), binding.postCommentsList, false);
+            java.util.List<CommentModel> comments = post.getComments();
+            binding.postCommentsEmpty.setVisibility(comments.isEmpty() ? View.VISIBLE : View.GONE);
+            LayoutInflater inflater = LayoutInflater.from(context);
+            for (int i = 0; i < comments.size(); i++) {
+                CommentModel comment = comments.get(i);
+                ItemCommunityCommentBinding item;
+                if (i < binding.postCommentsList.getChildCount()) {
+                    item = ItemCommunityCommentBinding.bind(binding.postCommentsList.getChildAt(i));
+                    item.getRoot().setVisibility(View.VISIBLE);
+                } else {
+                    item = ItemCommunityCommentBinding.inflate(inflater, binding.postCommentsList, false);
+                    binding.postCommentsList.addView(item.getRoot());
+                }
                 item.commentMeta.setText(context.getString(R.string.community_comment_meta,
                         comment.getAuthor(), relativeTime(context, comment.getCreatedAt())));
                 item.commentContent.setText(comment.getContent());
-                binding.postCommentsList.addView(item.getRoot());
             }
-            if (watcher != null) binding.postCommentInput.removeTextChangedListener(watcher);
+            for (int i = comments.size(); i < binding.postCommentsList.getChildCount(); i++) {
+                binding.postCommentsList.getChildAt(i).setVisibility(View.GONE);
+            }
+            bindingDraft = true;
             binding.postCommentInput.setText(commentDrafts.getOrDefault(post.getId(), ""));
-            watcher = new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence text, int start,
-                                                        int count, int after) { }
-                @Override public void onTextChanged(CharSequence text, int start,
-                                                    int before, int count) {
-                    commentDrafts.put(post.getId(), text.toString());
-                }
-                @Override public void afterTextChanged(Editable text) { }
-            };
-            binding.postCommentInput.addTextChangedListener(watcher);
-            binding.postCommentSend.setOnClickListener(view -> {
-                String text = binding.postCommentInput.getText() == null ? ""
-                        : binding.postCommentInput.getText().toString().trim();
-                if (text.isEmpty()) {
-                    binding.postCommentInput.setError(
-                            context.getString(R.string.community_comment_required));
-                    return;
-                }
-                if (actions.onComment(post, text)) {
-                    binding.postCommentInput.setText("");
-                    commentDrafts.remove(post.getId());
-                    binding.postCommentInput.clearFocus();
-                }
-            });
+            bindingDraft = false;
         }
     }
 

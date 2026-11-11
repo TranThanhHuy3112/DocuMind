@@ -30,6 +30,7 @@ public final class AuthRepository {
     public static final long OTP_LIFETIME_MS = 60_000L;
     public static final long OTP_LOCK_MS = 180_000L;
     public static final int MAX_OTP_ATTEMPTS = 5;
+    public static final int MAX_PASSWORD_LENGTH = 128;
     private static final String USERS = "users";
     private static final String PENDING = "pending_registrations";
     private static final String RESET_PENDING = "pending_password_resets";
@@ -45,8 +46,7 @@ public final class AuthRepository {
     private FirebaseAuthGateway firebase;
 
     public AuthRepository(Context context) {
-        this(context, "documind_auth", System::currentTimeMillis);
-        if (!localStoreForInstrumentation) firebase = new FirebaseAuthGateway(context);
+        this(context, "documind_auth", System::currentTimeMillis, !localStoreForInstrumentation);
     }
 
     /** Keeps emulator UI tests off the production Firebase project. Debug builds only. */
@@ -60,11 +60,20 @@ public final class AuthRepository {
 
     /** Named store and clock permit isolated tests without touching a user's account data. */
     public AuthRepository(Context context, String preferencesName, Clock clock) {
+        this(context, preferencesName, clock, false);
+    }
+
+    private AuthRepository(Context context, String preferencesName, Clock clock, boolean useFirebase) {
         storeName = preferencesName;
-        preferences = context.getApplicationContext()
-                .getSharedPreferences(preferencesName, Context.MODE_PRIVATE);
         this.clock = clock;
-        firebase = null;
+        if (useFirebase) {
+            preferences = null;
+            firebase = new FirebaseAuthGateway(context);
+        } else {
+            preferences = context.getApplicationContext()
+                    .getSharedPreferences(preferencesName, Context.MODE_PRIVATE);
+            firebase = null;
+        }
     }
 
     public synchronized AuthResult<OtpChallenge> register(String fullName, String email,
@@ -72,7 +81,7 @@ public final class AuthRepository {
         if (firebase != null) return firebase.register(fullName, email, password, confirmation);
         String name = fullName == null ? "" : fullName.trim();
         String normalized = normalizeEmail(email);
-        if (name.isEmpty()) return AuthResult.error(AuthResult.Error.NAME_REQUIRED);
+        if (name.isEmpty() || name.length() > 80) return AuthResult.error(AuthResult.Error.NAME_REQUIRED);
         if (!isValidEmail(normalized)) return AuthResult.error(AuthResult.Error.INVALID_EMAIL);
         if (!isStrongPassword(password)) return AuthResult.error(AuthResult.Error.WEAK_PASSWORD);
         if (!password.equals(confirmation)) {
@@ -87,12 +96,20 @@ public final class AuthRepository {
         if (prior != null && prior.lockedUntil > now) {
             return AuthResult.error(AuthResult.Error.OTP_LOCKED, 0, prior.lockedUntil);
         }
+        if (prior != null && prior.sentAt > 0 && prior.sentAt + OTP_LIFETIME_MS > now) {
+            return AuthResult.error(AuthResult.Error.OTP_LOCKED, 0,
+                    prior.sentAt + OTP_LIFETIME_MS);
+        }
+        if (prior != null && prior.expiresAt > now) {
+            return AuthResult.error(AuthResult.Error.OTP_LOCKED, 0, prior.expiresAt);
+        }
         try {
             PendingRegistration next = new PendingRegistration();
             next.fullName = name;
             next.email = normalized;
             next.passwordHash = hasher.hashPassword(password);
             next.createdAt = prior == null ? now : prior.createdAt;
+            next.sentAt = now;
             next.attempts = prior == null || prior.lockedUntil > 0 ? 0 : prior.attempts;
             String code = newCode();
             next.otpHash = hasher.hashOtp(code);
@@ -132,6 +149,9 @@ public final class AuthRepository {
         if (pending.lockedUntil > now) {
             return AuthResult.error(AuthResult.Error.OTP_LOCKED, 0, pending.lockedUntil);
         }
+        if (pending.sentAt > 0 && pending.sentAt + OTP_LIFETIME_MS > now) {
+            return AuthResult.error(AuthResult.Error.OTP_LOCKED, 0, pending.sentAt + OTP_LIFETIME_MS);
+        }
         try {
             List<PendingRegistration> all = readPending(key);
             pending = findPending(all, normalized);
@@ -142,6 +162,7 @@ public final class AuthRepository {
             }
             String code = newCode();
             pending.otpHash = hasher.hashOtp(code);
+            pending.sentAt = now;
             pending.expiresAt = now + OTP_LIFETIME_MS;
             if (!writePending(key, all)) return AuthResult.error(AuthResult.Error.STORAGE_ERROR);
             return AuthResult.success(new OtpChallenge(normalized, code, pending.expiresAt));
@@ -169,7 +190,7 @@ public final class AuthRepository {
         }
         try {
             boolean correct = inputCode != null && inputCode.matches("[0-9]{6}")
-                    && hasher.matches(inputCode, pending.otpHash);
+                    && hasher.matchesOtp(inputCode, pending.otpHash);
             if (!correct) {
                 pending.attempts++;
                 if (pending.attempts >= MAX_OTP_ATTEMPTS) {
@@ -215,12 +236,17 @@ public final class AuthRepository {
         if (prior != null && prior.lockedUntil > now) {
             return AuthResult.error(AuthResult.Error.OTP_LOCKED, 0, prior.lockedUntil);
         }
+        if (prior != null && prior.sentAt > 0 && prior.sentAt + OTP_LIFETIME_MS > now) {
+            return AuthResult.error(AuthResult.Error.OTP_LOCKED, 0,
+                    prior.sentAt + OTP_LIFETIME_MS);
+        }
         try {
             PendingRegistration next = new PendingRegistration();
             next.email = normalized;
             next.fullName = user.getFullName();
             next.passwordHash = user.getPasswordHash();
             next.createdAt = now;
+            next.sentAt = now;
             next.attempts = prior == null || prior.lockedUntil > 0 ? 0 : prior.attempts;
             String code = newCode();
             next.otpHash = hasher.hashOtp(code);
@@ -261,7 +287,7 @@ public final class AuthRepository {
         if (now >= pending.expiresAt) return AuthResult.error(AuthResult.Error.OTP_EXPIRED);
         try {
             boolean correct = code != null && code.matches("[0-9]{6}")
-                    && hasher.matches(code, pending.otpHash);
+                    && hasher.matchesOtp(code, pending.otpHash);
             if (!correct) {
                 pending.attempts++;
                 if (pending.attempts >= MAX_OTP_ATTEMPTS) {
@@ -307,14 +333,17 @@ public final class AuthRepository {
         String normalized = normalizeEmail(email);
         if (!isValidEmail(normalized)) return AuthResult.error(AuthResult.Error.INVALID_EMAIL);
         UserModel user = findUser(readUsers(), normalized);
-        if (password == null) {
+        if (password == null || password.length() > MAX_PASSWORD_LENGTH) {
             return AuthResult.error(AuthResult.Error.INVALID_CREDENTIALS);
         }
         if (user == null) {
             PendingRegistration pending = findPending(readPending(), normalized);
-            if (pending == null) return AuthResult.error(AuthResult.Error.INVALID_CREDENTIALS);
+            if (pending == null) {
+                hasher.runDummyWork();
+                return AuthResult.error(AuthResult.Error.INVALID_CREDENTIALS);
+            }
             try {
-                return hasher.matches(password, pending.passwordHash)
+                return hasher.matchesPassword(password, pending.passwordHash)
                         ? AuthResult.error(AuthResult.Error.EMAIL_UNVERIFIED)
                         : AuthResult.error(AuthResult.Error.INVALID_CREDENTIALS);
             } catch (GeneralSecurityException exception) {
@@ -322,7 +351,7 @@ public final class AuthRepository {
             }
         }
         try {
-            if (!hasher.matches(password, user.getPasswordHash())) {
+            if (!hasher.matchesPassword(password, user.getPasswordHash())) {
                 return AuthResult.error(AuthResult.Error.INVALID_CREDENTIALS);
             }
         } catch (GeneralSecurityException exception) {
@@ -335,12 +364,8 @@ public final class AuthRepository {
         return AuthResult.success(user);
     }
 
-    public synchronized boolean saveCurrentUser(UserModel user) {
-        return saveCurrentUser(user, true);
-    }
-
     public synchronized boolean saveCurrentUser(UserModel user, boolean rememberSession) {
-        if (firebase != null) return firebase.currentUser() != null;
+        if (firebase != null) return firebase.setRememberSession(rememberSession);
         if (user == null || !user.isEmailVerified()) return false;
         UserModel stored = findUser(readUsers(), user.getEmail());
         if (stored == null || !stored.getId().equals(user.getId())
@@ -398,7 +423,7 @@ public final class AuthRepository {
     }
 
     public synchronized long getOtpLockedUntil(String email) {
-        if (firebase != null) return 0L;
+        if (firebase != null) return firebase.lockedUntil(email);
         PendingRegistration pending = findPending(readPending(), normalizeEmail(email));
         return pending == null ? 0L : pending.lockedUntil;
     }
@@ -422,7 +447,9 @@ public final class AuthRepository {
     }
 
     public static boolean isStrongPassword(String password) {
-        if (password == null || password.length() < 8) return false;
+        if (password == null || password.length() < 8 || password.length() > MAX_PASSWORD_LENGTH) {
+            return false;
+        }
         boolean upper = false, lower = false, digit = false;
         for (int i = 0; i < password.length(); i++) {
             char character = password.charAt(i);
@@ -474,6 +501,7 @@ public final class AuthRepository {
             pending.passwordHash = item.optString("passwordHash", "");
             pending.otpHash = item.optString("otpHash", "");
             pending.createdAt = item.optLong("createdAt", 0L);
+            pending.sentAt = item.optLong("sentAt", 0L);
             pending.expiresAt = item.optLong("expiresAt", 0L);
             pending.attempts = item.optInt("attempts", 0);
             pending.lockedUntil = item.optLong("lockedUntil", 0L);
@@ -525,6 +553,7 @@ public final class AuthRepository {
             item.put("passwordHash", registration.passwordHash);
             item.put("otpHash", registration.otpHash);
             item.put("createdAt", registration.createdAt);
+            item.put("sentAt", registration.sentAt);
             item.put("expiresAt", registration.expiresAt);
             item.put("attempts", registration.attempts);
             item.put("lockedUntil", registration.lockedUntil);
@@ -550,6 +579,7 @@ public final class AuthRepository {
         String passwordHash;
         String otpHash;
         long createdAt;
+        long sentAt;
         long expiresAt;
         int attempts;
         long lockedUntil;

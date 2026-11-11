@@ -3,32 +3,54 @@ package com.example.appdt.ui.tools;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.util.AttributeSet;
 import android.view.View;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.google.android.material.color.MaterialColors;
 
+import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public final class RevenueBarChartView extends View {
+    private static final Locale VI_LOCALE = Locale.forLanguageTag("vi-VN");
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private List<RevenueCsvParser.Entry> entries = new ArrayList<>();
+    private String[] valueLabels = new String[0];
+    private String[] axisLabels = new String[0];
+    private final float density;
     private final int accent;
     private final int labelColor;
 
     public RevenueBarChartView(Context context) {
-        super(context);
+        this(context, null);
+    }
+
+    public RevenueBarChartView(Context context, @Nullable AttributeSet attrs) {
+        super(context, attrs);
+        density = getResources().getDisplayMetrics().density;
         accent = MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary);
         labelColor = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface);
-        setMinimumHeight((int) (210 * getResources().getDisplayMetrics().density));
+        paint.setTextAlign(Paint.Align.CENTER);
+        setMinimumHeight((int) (210 * density));
     }
 
     public void setEntries(List<RevenueCsvParser.Entry> values) {
         entries = new ArrayList<>(values);
+        valueLabels = new String[entries.size()];
+        axisLabels = new String[entries.size()];
+        NumberFormat numberFormat = NumberFormat.getNumberInstance(VI_LOCALE);
+        numberFormat.setMaximumFractionDigits(0);
         StringBuilder description = new StringBuilder();
-        for (RevenueCsvParser.Entry entry : entries) {
+        for (int i = 0; i < entries.size(); i++) {
+            RevenueCsvParser.Entry entry = entries.get(i);
+            valueLabels[i] = formatCompact(entry.value, numberFormat);
+            axisLabels[i] = entry.label.length() > 8
+                    ? entry.label.substring(0, 7) + "…" : entry.label;
             if (description.length() > 0) description.append(", ");
             description.append(entry.label).append(": ").append(entry.value);
         }
@@ -36,8 +58,15 @@ public final class RevenueBarChartView extends View {
         invalidate();
     }
 
+    private static String formatCompact(double value, NumberFormat fullFormat) {
+        if (value >= 1_000_000_000d) return String.format(VI_LOCALE, "%.1fB", value / 1_000_000_000d);
+        if (value >= 1_000_000d) return String.format(VI_LOCALE, "%.1fM", value / 1_000_000d);
+        if (value >= 100_000d) return String.format(VI_LOCALE, "%.0fK", value / 1_000d);
+        return fullFormat.format(value);
+    }
+
     @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int desiredHeight = (int) (220 * getResources().getDisplayMetrics().density + 0.5f);
+        int desiredHeight = (int) (220 * density + 0.5f);
         setMeasuredDimension(resolveSize(getSuggestedMinimumWidth(), widthMeasureSpec),
                 resolveSize(desiredHeight, heightMeasureSpec));
     }
@@ -45,10 +74,9 @@ public final class RevenueBarChartView extends View {
     @Override protected void onDraw(@NonNull Canvas canvas) {
         super.onDraw(canvas);
         if (entries.isEmpty()) return;
-        float density = getResources().getDisplayMetrics().density;
         float top = 26 * density;
         float baseline = getHeight() - 38 * density;
-        float chartHeight = baseline - top;
+        float chartHeight = Math.max(0f, baseline - top);
         float slot = getWidth() / (float) entries.size();
         double max = 1;
         for (RevenueCsvParser.Entry entry : entries) max = Math.max(max, entry.value);
@@ -63,15 +91,10 @@ public final class RevenueBarChartView extends View {
             paint.setColor(labelColor);
             if (entries.size() <= 6) {
                 paint.setTextSize(10 * density);
-                paint.setTextAlign(Paint.Align.CENTER);
-                canvas.drawText(String.format(java.util.Locale.getDefault(), "%.0f", entry.value),
-                        center, baseline - height - 7 * density, paint);
+                canvas.drawText(valueLabels[i], center, baseline - height - 7 * density, paint);
             }
             paint.setTextSize(11 * density);
-            paint.setTextAlign(Paint.Align.CENTER);
-            String label = entry.label.length() > 8
-                    ? entry.label.substring(0, 7) + "…" : entry.label;
-            canvas.drawText(label, center, baseline + 20 * density, paint);
+            canvas.drawText(axisLabels[i], center, baseline + 20 * density, paint);
             paint.setColor(accent);
         }
     }

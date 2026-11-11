@@ -1,10 +1,7 @@
 package com.example.appdt.ui;
 
-import android.content.ContentResolver;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -29,15 +26,11 @@ import com.example.appdt.utils.DocumentPicker;
 import com.google.android.material.snackbar.Snackbar;
 
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class HomeFragment extends Fragment {
     private FragmentHomeBinding binding;
     private WorkspaceViewModel viewModel;
     private RecentActivityAdapter activityAdapter;
-    private ExecutorService fileExecutor;
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private final ActivityResultLauncher<String[]> documentPicker = registerForActivityResult(
             new ActivityResultContracts.OpenMultipleDocuments(), this::onDocumentsSelected);
@@ -47,7 +40,6 @@ public class HomeFragment extends Fragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
                              @Nullable Bundle savedInstanceState) {
         binding = FragmentHomeBinding.inflate(inflater, container, false);
-        fileExecutor = Executors.newSingleThreadExecutor();
         return binding.getRoot();
     }
 
@@ -71,6 +63,7 @@ public class HomeFragment extends Fragment {
             activityAdapter.submitList(activities);
             binding.emptyActivities.setVisibility(activities.isEmpty() ? View.VISIBLE : View.GONE);
         });
+        viewModel.getImportFeedback().observe(getViewLifecycleOwner(), this::showImportFeedback);
     }
 
     private void setupRecentActivities() {
@@ -126,46 +119,20 @@ public class HomeFragment extends Fragment {
     }
 
     private void onDocumentsSelected(List<Uri> uris) {
-        if (uris == null || uris.isEmpty() || fileExecutor == null
-                || fileExecutor.isShutdown()) {
-            return;
-        }
-        ContentResolver resolver = requireContext().getApplicationContext().getContentResolver();
-        String unnamedDocument = getString(R.string.unnamed_document);
-        fileExecutor.execute(() -> {
-            for (Uri uri : uris) {
-                if (Thread.currentThread().isInterrupted()) {
-                    return;
-                }
-                DocumentModel document = DocumentPicker.readMetadata(resolver, uri,
-                        unnamedDocument);
-                mainHandler.post(() -> addDocumentOnMainThread(document, resolver));
-            }
-        });
+        if (uris == null || uris.isEmpty() || !isAdded()) return;
+        viewModel.importDocuments(uris,
+                requireContext().getApplicationContext().getContentResolver(),
+                getString(R.string.unnamed_document));
     }
 
-    private void addDocumentOnMainThread(DocumentModel document, ContentResolver resolver) {
-        if (!isAdded()) {
-            return;
-        }
-        if (!DocumentPicker.isSupported(document)) {
-            showMessage(R.string.unsupported_document);
-            return;
-        }
-        WorkspaceRepository.AddResult result = viewModel.addDocument(document, resolver);
-        if (binding == null) {
-            return;
-        }
-        if (result == WorkspaceRepository.AddResult.ADDED) {
-            DocumentPicker.keepReadPermission(resolver, Uri.parse(document.getPath()));
-            Snackbar.make(binding.getRoot(),
-                    getString(R.string.document_added, document.getName()),
-                    Snackbar.LENGTH_SHORT).show();
-        } else if (result == WorkspaceRepository.AddResult.DUPLICATE) {
-            showMessage(R.string.duplicate_document);
-        } else {
-            showMessage(R.string.workspace_full);
-        }
+    private void showImportFeedback(@Nullable WorkspaceViewModel.ImportFeedback feedback) {
+        if (feedback == null || binding == null) return;
+        String text = feedback.documentName != null
+                ? getString(feedback.messageRes, feedback.documentName)
+                : getString(feedback.messageRes);
+        Snackbar.make(binding.getRoot(), text,
+                feedback.shortDuration ? Snackbar.LENGTH_SHORT : Snackbar.LENGTH_LONG).show();
+        viewModel.clearImportFeedback();
     }
 
     private void showMessage(int message) {
@@ -176,11 +143,6 @@ public class HomeFragment extends Fragment {
 
     @Override
     public void onDestroyView() {
-        if (fileExecutor != null) {
-            fileExecutor.shutdownNow();
-            fileExecutor = null;
-        }
-        mainHandler.removeCallbacksAndMessages(null);
         binding.recentActivities.setAdapter(null);
         binding = null;
         super.onDestroyView();

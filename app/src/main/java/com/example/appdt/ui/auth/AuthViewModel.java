@@ -18,6 +18,7 @@ import com.example.appdt.repository.AuthRepository;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 /** UI state for the later Login, Register and Verify screens. */
 public final class AuthViewModel extends AndroidViewModel {
@@ -32,12 +33,7 @@ public final class AuthViewModel extends AndroidViewModel {
             new MutableLiveData<>();
     private final MutableLiveData<AuthResult<OtpChallenge>> resetRequestState =
             new MutableLiveData<>();
-    private final MutableLiveData<AuthResult<OtpChallenge>> resetResendState =
-            new MutableLiveData<>();
-    private final MutableLiveData<AuthResult<UserModel>> resetCompletionState =
-            new MutableLiveData<>();
     private final MutableLiveData<Long> countdownTimeRemaining = new MutableLiveData<>(0L);
-    private final MutableLiveData<Long> otpLockedUntil = new MutableLiveData<>(0L);
     private final MutableLiveData<Boolean> isLoading = new MutableLiveData<>(false);
     private final MutableLiveData<UserModel> currentUser;
     private CountDownTimer countdown;
@@ -61,28 +57,13 @@ public final class AuthViewModel extends AndroidViewModel {
     public LiveData<AuthResult<OtpChallenge>> getResetRequestState() {
         return resetRequestState;
     }
-    public LiveData<AuthResult<OtpChallenge>> getResetResendState() {
-        return resetResendState;
-    }
-    public LiveData<AuthResult<UserModel>> getResetCompletionState() {
-        return resetCompletionState;
-    }
     public LiveData<Long> getCountdownTimeRemaining() { return countdownTimeRemaining; }
-    public LiveData<Long> getOtpLockedUntil() { return otpLockedUntil; }
     public LiveData<Boolean> getIsLoading() { return isLoading; }
     public LiveData<UserModel> getCurrentUser() { return currentUser; }
 
     public void register(String fullName, String email, String password, String confirmation) {
         execute(registerState, () -> repository.register(fullName, email, password, confirmation),
-                result -> {
-                    if (result.getStatus() == AuthResult.Status.SUCCESS) {
-                        startCountdown(result.getValue().getExpiresAt());
-                    }
-                });
-    }
-
-    public void login(String email, String password) {
-        login(email, password, true);
+                this::handleOtpChallengeResult);
     }
 
     public void login(String email, String password, boolean rememberSession) {
@@ -94,82 +75,50 @@ public final class AuthViewModel extends AndroidViewModel {
     }
 
     public void verifyOtp(String email, String code) {
-        execute(otpState, () -> repository.verifyOtp(email, code), result -> {
-            if (result.getStatus() == AuthResult.Status.SUCCESS) {
-                stopCountdown();
-                otpLockedUntil.setValue(0L);
-                currentUser.setValue(result.getValue());
-            } else if (result.getError() == AuthResult.Error.OTP_LOCKED) {
-                otpLockedUntil.setValue(result.getRetryAt());
-            }
-        });
+        execute(otpState, () -> repository.verifyOtp(email, code), this::handleVerificationResult);
     }
 
     public void checkEmailVerified(String email) {
-        execute(otpState, () -> repository.checkEmailVerified(email), result -> {
-            if (result.getStatus() == AuthResult.Status.SUCCESS) {
-                stopCountdown();
-                currentUser.setValue(result.getValue());
-            }
-        });
+        execute(otpState, () -> repository.checkEmailVerified(email), this::handleVerificationResult);
     }
 
     public void resendOtp(String email) {
-        execute(resendState, () -> repository.generateOtp(email), result -> {
-            if (result.getStatus() == AuthResult.Status.SUCCESS) {
-                otpLockedUntil.setValue(0L);
-                startCountdown(result.getValue().getExpiresAt());
-            } else if (result.getError() == AuthResult.Error.OTP_LOCKED) {
-                otpLockedUntil.setValue(result.getRetryAt());
-            }
-        });
+        execute(resendState, () -> repository.generateOtp(email), this::handleOtpChallengeResult);
     }
 
     public void requestPasswordReset(String email) {
-        execute(resetRequestState, () -> repository.requestPasswordReset(email), result -> {
-            if (result.getStatus() == AuthResult.Status.SUCCESS) {
-                otpLockedUntil.setValue(0L);
-                startCountdown(result.getValue().getExpiresAt());
-            } else if (result.getError() == AuthResult.Error.OTP_LOCKED) {
-                otpLockedUntil.setValue(result.getRetryAt());
-            }
-        });
+        execute(resetRequestState, () -> repository.requestPasswordReset(email),
+                this::handleOtpChallengeResult);
     }
 
-    public void resendResetOtp(String email) {
-        execute(resetResendState, () -> repository.generateResetOtp(email), result -> {
-            if (result.getStatus() == AuthResult.Status.SUCCESS) {
-                otpLockedUntil.setValue(0L);
-                startCountdown(result.getValue().getExpiresAt());
-            } else if (result.getError() == AuthResult.Error.OTP_LOCKED) {
-                otpLockedUntil.setValue(result.getRetryAt());
-            }
-        });
+    private void handleVerificationResult(AuthResult<UserModel> result) {
+        if (result.getStatus() == AuthResult.Status.SUCCESS) {
+            stopCountdown();
+            currentUser.setValue(result.getValue());
+        } else if (result.getError() == AuthResult.Error.OTP_LOCKED && result.getRetryAt() > 0L) {
+            startCountdown(result.getRetryAt());
+        }
     }
 
-    public void resetPassword(String email, String code, String newPassword,
-                              String confirmation) {
-        execute(resetCompletionState,
-                () -> repository.resetPassword(email, code, newPassword, confirmation), result -> {
-                    if (result.getStatus() == AuthResult.Status.SUCCESS) {
-                        stopCountdown();
-                        otpLockedUntil.setValue(0L);
-                        currentUser.setValue(null);
-                    } else if (result.getError() == AuthResult.Error.OTP_LOCKED) {
-                        otpLockedUntil.setValue(result.getRetryAt());
-                    }
-                });
+    private void handleOtpChallengeResult(AuthResult<OtpChallenge> result) {
+        if (result.getStatus() == AuthResult.Status.SUCCESS) {
+            startCountdown(result.getValue().getExpiresAt());
+        } else if (result.getError() == AuthResult.Error.OTP_LOCKED && result.getRetryAt() > 0L) {
+            startCountdown(result.getRetryAt());
+        }
     }
 
     public void resumeResetCountdown(String email) {
-        executeCountdownLookup(() -> new long[] {repository.getResetExpiresAt(email),
-                repository.getResetLockedUntil(email)});
+        executeCountdownLookup(() -> Math.max(
+                repository.getResetExpiresAt(email),
+                repository.getResetLockedUntil(email)));
     }
 
     /** Call from Verify screen onStart to continue the persisted expiry after rotation. */
     public void resumeCountdown(String email) {
-        executeCountdownLookup(() -> new long[] {repository.getOtpExpiresAt(email),
-                repository.getOtpLockedUntil(email)});
+        executeCountdownLookup(() -> Math.max(
+                repository.getOtpExpiresAt(email),
+                repository.getOtpLockedUntil(email)));
     }
 
     /** Call from Verify screen onStop; onCleared also cancels the timer. */
@@ -180,13 +129,9 @@ public final class AuthViewModel extends AndroidViewModel {
         }
     }
 
-    public void logout() {
-        executeLogout();
-    }
-
     private <T> void execute(MutableLiveData<AuthResult<T>> state,
-                             Callable<AuthResult<T>> action, ResultConsumer<T> after) {
-        mainHandler.post(() -> {
+                             Callable<AuthResult<T>> action, Consumer<AuthResult<T>> after) {
+        Runnable start = () -> {
             if (cleared) return;
             activeOperations++;
             isLoading.setValue(true);
@@ -207,31 +152,24 @@ public final class AuthViewModel extends AndroidViewModel {
                     isLoading.setValue(activeOperations > 0);
                 });
             });
-        });
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) start.run();
+        else mainHandler.post(start);
     }
 
-    private void executeCountdownLookup(Callable<long[]> action) {
+    private void executeCountdownLookup(Callable<Long> action) {
+        if (cleared || worker.isShutdown()) return;
         worker.execute(() -> {
-            long[] state;
+            long until;
             try {
-                state = action.call();
+                until = action.call();
             } catch (Exception exception) {
-                state = new long[] {0L, 0L};
+                until = 0L;
             }
-            long[] value = state;
+            long target = until;
             mainHandler.post(() -> {
-                if (!cleared) {
-                    otpLockedUntil.setValue(value[1]);
-                    startCountdown(value[0]);
-                }
+                if (!cleared) startCountdown(target);
             });
-        });
-    }
-
-    private void executeLogout() {
-        worker.execute(() -> {
-            repository.logout();
-            mainHandler.post(() -> { if (!cleared) currentUser.setValue(null); });
         });
     }
 
@@ -259,6 +197,4 @@ public final class AuthViewModel extends AndroidViewModel {
         worker.shutdownNow();
         super.onCleared();
     }
-
-    private interface ResultConsumer<T> { void accept(AuthResult<T> result); }
 }

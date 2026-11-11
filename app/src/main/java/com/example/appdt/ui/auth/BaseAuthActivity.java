@@ -8,19 +8,31 @@ import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.app.AppCompatDelegate;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 
-import com.example.appdt.R;
 import com.example.appdt.repository.SettingsRepository;
 import com.google.android.material.textfield.TextInputEditText;
 
 abstract class BaseAuthActivity extends AppCompatActivity {
     @Override protected void onCreate(@Nullable Bundle savedInstanceState) {
-        SettingsRepository settings = new SettingsRepository(this);
-        AppCompatDelegate.setDefaultNightMode(settings.getNightMode());
-        setTheme(R.style.Theme_DocuMind);
-        getTheme().applyStyle(settings.getAccent().getThemeOverlay(), true);
+        SettingsRepository.applyThemeAndSecureWindow(this);
         super.onCreate(savedInstanceState);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+    }
+
+    @Override public void setContentView(View view) {
+        super.setContentView(view);
+        ViewCompat.setOnApplyWindowInsetsListener(view, (target, windowInsets) -> {
+            Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()
+                    | WindowInsetsCompat.Type.displayCutout()
+                    | WindowInsetsCompat.Type.ime());
+            target.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+            return WindowInsetsCompat.CONSUMED;
+        });
+        ViewCompat.requestApplyInsets(view);
     }
 
     protected static String value(TextInputEditText field) {

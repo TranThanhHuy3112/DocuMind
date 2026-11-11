@@ -55,6 +55,7 @@ public final class ChatBottomSheetDialog extends ToolSheet {
         MaterialButton send = new MaterialButton(requireContext());
         send.setId(R.id.chat_send);
         send.setText(R.string.chat_send);
+        send.setFilterTouchesWhenObscured(true);
         binding.toolActions.addView(send);
         send.setOnClickListener(view -> {
             String message = question.getText() == null ? "" : question.getText().toString().trim();
@@ -70,7 +71,9 @@ public final class ChatBottomSheetDialog extends ToolSheet {
             askAi(Collections.singletonList(source), "Trả lời câu hỏi sau dựa trên tài liệu: "
                     + message, answer, send);
             question.setText("");
-            binding.toolScroll.post(() -> binding.toolScroll.fullScroll(android.view.View.FOCUS_DOWN));
+            binding.toolScroll.post(() -> {
+                if (binding != null) binding.toolScroll.fullScroll(android.view.View.FOCUS_DOWN);
+            });
         });
     }
 }

@@ -1,8 +1,8 @@
 package com.example.appdt;
 
-import android.content.res.Configuration;
 import android.content.Intent;
 import android.os.Bundle;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.graphics.Insets;
@@ -30,13 +30,11 @@ public class MainActivity extends AppCompatActivity {
     private ActivityMainBinding binding;
     private WorkspaceViewModel viewModel;
     private SettingsRepository settings;
+    private AlertDialog accentDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        settings = new SettingsRepository(getApplicationContext());
-        AppCompatDelegate.setDefaultNightMode(settings.getNightMode());
-        setTheme(R.style.Theme_DocuMind);
-        getTheme().applyStyle(settings.getAccent().getThemeOverlay(), true);
+        settings = SettingsRepository.applyThemeAndSecureWindow(this);
         super.onCreate(savedInstanceState);
         UserModel currentUser = new AuthRepository(getApplicationContext()).getCurrentUser();
         if (currentUser == null) {
@@ -62,29 +60,35 @@ public class MainActivity extends AppCompatActivity {
         viewModel.getSelectedTab().observe(this, this::showTab);
         binding.themeToggle.setOnClickListener(view -> toggleTheme());
         binding.accentPicker.setOnClickListener(view -> showAccentPicker());
-        boolean dark = isDarkMode();
+        boolean dark = SettingsRepository.isDarkMode(this);
         binding.themeToggle.setIconResource(dark ? R.drawable.ic_sun : R.drawable.ic_moon);
         binding.themeToggle.setContentDescription(getString(dark
                 ? R.string.switch_to_light : R.string.switch_to_dark));
     }
 
+    public void refreshUserSubtitle() {
+        if (binding == null) return;
+        UserModel currentUser = new AuthRepository(getApplicationContext()).getCurrentUser();
+        if (currentUser != null) {
+            binding.brandSubtitle.setText(getString(R.string.main_signed_in_as,
+                    currentUser.getFullName()));
+        }
+    }
+
     private void applyInsets() {
         ViewCompat.setOnApplyWindowInsetsListener(binding.getRoot(), (view, windowInsets) -> {
             Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()
-                    | WindowInsetsCompat.Type.displayCutout());
+                    | WindowInsetsCompat.Type.displayCutout()
+                    | WindowInsetsCompat.Type.ime());
             view.setPadding(insets.left, insets.top, insets.right, insets.bottom);
             return WindowInsetsCompat.CONSUMED;
         });
         ViewCompat.requestApplyInsets(binding.getRoot());
+        boolean lightIcons = !SettingsRepository.isDarkMode(this);
         WindowCompat.getInsetsController(getWindow(), binding.getRoot())
-                .setAppearanceLightStatusBars(!isDarkMode());
+                .setAppearanceLightStatusBars(lightIcons);
         WindowCompat.getInsetsController(getWindow(), binding.getRoot())
-                .setAppearanceLightNavigationBars(!isDarkMode());
-    }
-
-    private boolean isDarkMode() {
-        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
-                == Configuration.UI_MODE_NIGHT_YES;
+                .setAppearanceLightNavigationBars(lightIcons);
     }
 
     private void toggleTheme() {
@@ -100,7 +104,8 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < accents.length; i++) {
             labels[i] = getString(accents[i].getLabel());
         }
-        new MaterialAlertDialogBuilder(this)
+        if (accentDialog != null && accentDialog.isShowing()) accentDialog.dismiss();
+        accentDialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.choose_accent)
                 .setSingleChoiceItems(labels, settings.getAccent().ordinal(), (dialog, which) -> {
                     if (accents[which] != settings.getAccent()) {
@@ -110,7 +115,8 @@ public class MainActivity extends AppCompatActivity {
                     dialog.dismiss();
                 })
                 .setNegativeButton(R.string.close, null)
-                .show();
+                .create();
+        accentDialog.show();
     }
 
     private void showTab(int tabId) {
@@ -122,6 +128,7 @@ public class MainActivity extends AppCompatActivity {
         if (current != null && tag.equals(current.getTag())) {
             return;
         }
+        if (getSupportFragmentManager().isStateSaved()) return;
         Fragment next;
         if (tabId == R.id.nav_files) {
             next = new FilesFragment();
@@ -140,6 +147,8 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (accentDialog != null && accentDialog.isShowing()) accentDialog.dismiss();
+        accentDialog = null;
         super.onDestroy();
         binding = null;
     }

@@ -31,6 +31,7 @@ public final class CompareBottomSheetDialog extends ToolSheet {
         comparison.setId(R.id.compare_result);
         MaterialButton compare = new MaterialButton(requireContext());
         compare.setText(R.string.compare_start);
+        compare.setFilterTouchesWhenObscured(true);
         binding.toolActions.addView(compare);
         compare.setOnClickListener(view -> askAi(Arrays.asList(first, second),
                 "So sánh nội dung hai nguồn: điểm giống, điểm khác, số liệu mâu thuẫn "

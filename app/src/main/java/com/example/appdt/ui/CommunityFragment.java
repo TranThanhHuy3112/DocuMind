@@ -6,9 +6,11 @@ import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
@@ -19,6 +21,7 @@ import com.example.appdt.model.PostAttachment;
 import com.example.appdt.model.PostModel;
 import com.example.appdt.repository.CommunityRepository;
 import com.example.appdt.utils.CommunityShare;
+import com.example.appdt.utils.DocumentPicker;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
@@ -29,6 +32,7 @@ public final class CommunityFragment extends Fragment {
     private CommunityPostAdapter adapter;
     private CommunityRepository repository;
     private String firstPostId;
+    private AlertDialog deleteDialog;
 
     @Nullable @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup parent,
@@ -55,13 +59,19 @@ public final class CommunityFragment extends Fragment {
             @Override public void onShare(PostModel post) { sharePost(post); }
             @Override public void onAttachment(PostModel post) { openAttachment(post); }
             @Override public void onDelete(PostModel post) {
-                new MaterialAlertDialogBuilder(requireContext())
+                if (deleteDialog != null && deleteDialog.isShowing()) deleteDialog.dismiss();
+                deleteDialog = new MaterialAlertDialogBuilder(requireContext())
                         .setTitle(R.string.community_delete_confirm)
                         .setMessage(post.getTitle())
                         .setNegativeButton(R.string.cancel, null)
                         .setPositiveButton(R.string.delete, (dialog, which) ->
                                 repository.removePost(post.getId()))
-                        .show();
+                        .create();
+                deleteDialog.setOnShowListener(ignored -> {
+                    Button positive = deleteDialog.getButton(AlertDialog.BUTTON_POSITIVE);
+                    if (positive != null) positive.setFilterTouchesWhenObscured(true);
+                });
+                deleteDialog.show();
             }
         });
         binding.communityPosts.setLayoutManager(new LinearLayoutManager(requireContext()));
@@ -108,7 +118,12 @@ public final class CommunityFragment extends Fragment {
 
     private void openAttachment(PostModel post) {
         PostAttachment attachment = post.getAttachment();
-        if (attachment == null) return;
+        if (attachment == null
+                || !"content".equalsIgnoreCase(attachment.getUri().getScheme())
+                || !DocumentPicker.isAllowedPickedUri(attachment.getUri())) {
+            showMessage(R.string.community_cannot_open_attachment);
+            return;
+        }
         Intent view = new Intent(Intent.ACTION_VIEW)
                 .setDataAndType(attachment.getUri(), attachment.getMimeType())
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -124,6 +139,8 @@ public final class CommunityFragment extends Fragment {
     }
 
     @Override public void onDestroyView() {
+        if (deleteDialog != null && deleteDialog.isShowing()) deleteDialog.dismiss();
+        deleteDialog = null;
         repository.stopListening();
         binding.communityPosts.setAdapter(null);
         adapter = null;

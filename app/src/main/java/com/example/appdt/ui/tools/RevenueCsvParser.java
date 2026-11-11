@@ -8,6 +8,10 @@ import java.util.List;
 import java.util.Locale;
 
 public final class RevenueCsvParser {
+    private static final int MAX_LINE_LENGTH = 64 * 1024;
+    private static final int MAX_ROWS_SCANNED = 10_000;
+    private static final int MAX_COLUMNS = 256;
+
     public static final class Entry {
         public final String label;
         public final double value;
@@ -18,7 +22,7 @@ public final class RevenueCsvParser {
 
     public static List<Entry> parse(Reader reader) throws IOException {
         BufferedReader input = new BufferedReader(reader);
-        String headerLine = input.readLine();
+        String headerLine = readBoundedLine(input);
         List<Entry> result = new ArrayList<>();
         if (headerLine == null) return result;
         char delimiter = delimiter(headerLine);
@@ -34,7 +38,10 @@ public final class RevenueCsvParser {
         if (valueColumn < 0) return result;
         if (labelColumn < 0) labelColumn = valueColumn == 0 && headers.size() > 1 ? 1 : 0;
         String line;
-        while (result.size() < 12 && (line = input.readLine()) != null) {
+        int rowsScanned = 0;
+        while (result.size() < 12 && rowsScanned < MAX_ROWS_SCANNED
+                && (line = readBoundedLine(input)) != null) {
+            rowsScanned++;
             List<String> row = cells(line, delimiter);
             if (row.size() <= Math.max(valueColumn, labelColumn)) continue;
             try {
@@ -48,6 +55,26 @@ public final class RevenueCsvParser {
             }
         }
         return result;
+    }
+
+    private static String readBoundedLine(BufferedReader reader) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        int ch = reader.read();
+        if (ch == -1) return null;
+        while (ch != -1) {
+            if (ch == '\n') break;
+            if (ch == '\r') {
+                reader.mark(1);
+                if (reader.read() != '\n') reader.reset();
+                break;
+            }
+            if (sb.length() >= MAX_LINE_LENGTH) {
+                throw new IOException("Dòng CSV vượt quá độ dài cho phép.");
+            }
+            sb.append((char) ch);
+            ch = reader.read();
+        }
+        return sb.toString();
     }
 
     private static char delimiter(String header) {
@@ -64,8 +91,9 @@ public final class RevenueCsvParser {
 
     private static double parseAmount(String raw) {
         String value = raw.trim().replace("\u00A0", "").replace(" ", "")
-                .replace("₫", "").replace("đ", "")
-                .replace("VND", "").replace("vnd", "");
+                .replace("VNĐ", "").replace("vnđ", "")
+                .replace("VND", "").replace("vnd", "")
+                .replace("₫", "").replace("đ", "").replace("Đ", "");
         int comma = value.lastIndexOf(',');
         int dot = value.lastIndexOf('.');
         if (comma >= 0 && dot >= 0) {
@@ -93,9 +121,10 @@ public final class RevenueCsvParser {
                 } else quoted = !quoted;
             } else if (character == delimiter && !quoted) {
                 result.add(cell.toString()); cell.setLength(0);
+                if (result.size() >= MAX_COLUMNS) break;
             } else cell.append(character);
         }
-        result.add(cell.toString());
+        if (result.size() < MAX_COLUMNS) result.add(cell.toString());
         return result;
     }
 }

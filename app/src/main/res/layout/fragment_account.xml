@@ -69,7 +69,6 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    android:text="@string/account_profile_name"
                     android:textColor="?attr/colorOnSurface"
                     android:textSize="18sp"
                     android:textStyle="bold" />
@@ -78,7 +77,6 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="@string/account_profile_note"
                     android:textColor="?attr/colorOnSurfaceVariant"
                     android:textSize="12sp" />
                 <TextView
@@ -117,27 +115,15 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
+                    android:filterTouchesWhenObscured="true"
                     android:text="@string/account_edit_name" />
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/account_login"
-                    style="@style/Widget.Material3.Button"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="@string/account_sign_in" />
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/account_create_account"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="@string/account_create_account" />
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/account_logout"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
+                    android:filterTouchesWhenObscured="true"
                     android:text="@string/account_logout" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

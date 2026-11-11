@@ -74,8 +74,15 @@ public final class VerifyOtpActivity extends BaseAuthActivity {
             startActivity(intent);
             finish();
         } else if (result.getStatus() == AuthResult.Status.ERROR) {
-            showMessage(binding.verifyMessage, result.getError() == AuthResult.Error.EMAIL_UNVERIFIED
-                    ? R.string.auth_verify_pending : R.string.auth_error_storage);
+            int msg;
+            if (result.getError() == AuthResult.Error.EMAIL_UNVERIFIED) {
+                msg = R.string.auth_verify_pending;
+            } else if (result.getError() == AuthResult.Error.OTP_LOCKED) {
+                msg = R.string.auth_error_otp_locked;
+            } else {
+                msg = R.string.auth_error_storage;
+            }
+            showMessage(binding.verifyMessage, msg);
         }
     }
 

@@ -1,10 +1,16 @@
 package com.example.appdt.ui.tools;
 
-import android.content.res.Resources;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.PersistableBundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -22,10 +28,14 @@ import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.snackbar.Snackbar;
 
 import java.util.List;
 
 abstract class ToolSheet extends BottomSheetDialogFragment {
+    private static final String STATE_SOURCE_INDEX = "tool_source_index";
+    private static final String STATE_SECOND_INDEX = "tool_second_index";
+
     protected SheetDocumentToolBinding binding;
     protected WorkspaceViewModel workspace;
     protected AiDocumentService ai;
@@ -49,6 +59,10 @@ abstract class ToolSheet extends BottomSheetDialogFragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+        if (savedInstanceState != null) {
+            sourceIndex = Math.max(0, savedInstanceState.getInt(STATE_SOURCE_INDEX, 0));
+            secondIndex = Math.max(0, savedInstanceState.getInt(STATE_SECOND_INDEX, 1));
+        }
         workspace = new ViewModelProvider(requireActivity()).get(WorkspaceViewModel.class);
         ai = new AiDocumentService(requireContext());
         binding.toolTitle.setText(title());
@@ -58,16 +72,24 @@ abstract class ToolSheet extends BottomSheetDialogFragment {
             StringBuilder signature = new StringBuilder();
             for (DocumentModel source : sources) signature.append(source.getId()).append('\n');
             if (signature.toString().equals(lastSources)) return;
+            if (lastSources != null) {
+                sourceIndex = 0;
+                secondIndex = 1;
+            }
             lastSources = signature.toString();
-            sourceIndex = 0;
-            secondIndex = 1;
             renderCurrent(sources);
         });
     }
 
+    @Override
+    public void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt(STATE_SOURCE_INDEX, sourceIndex);
+        outState.putInt(STATE_SECOND_INDEX, secondIndex);
+    }
+
     private void renderCurrent(List<DocumentModel> sources) {
-        if (ai != null) ai.close();
-        ai = new AiDocumentService(requireContext());
+        if (ai != null) ai.cancelPending();
         aiBusy = false;
         binding.toolContent.removeAllViews();
         binding.toolActions.removeAllViews();
@@ -83,7 +105,8 @@ abstract class ToolSheet extends BottomSheetDialogFragment {
     }
 
     private void addSourceCycle(List<DocumentModel> sources, boolean second) {
-        int index = second ? secondIndex : sourceIndex;
+        int rawIndex = second ? secondIndex : sourceIndex;
+        int index = Math.min(rawIndex, sources.size() - 1);
         MaterialButton button = new MaterialButton(requireContext(), null,
                 com.google.android.material.R.attr.materialButtonOutlinedStyle);
         button.setText(getString(second ? R.string.tool_second_source : R.string.tool_first_source,
@@ -92,7 +115,8 @@ abstract class ToolSheet extends BottomSheetDialogFragment {
         button.setOnClickListener(ignored -> {
             int next = (index + 1) % sources.size();
             if (tool() == ToolKind.COMPARE && sources.size() > 1) {
-                int other = second ? sourceIndex : secondIndex;
+                int other = second ? Math.min(sourceIndex, sources.size() - 1)
+                        : Math.min(secondIndex, sources.size() - 1);
                 if (next == other) next = (next + 1) % sources.size();
             }
             if (second) secondIndex = next;
@@ -113,13 +137,16 @@ abstract class ToolSheet extends BottomSheetDialogFragment {
         super.onStart();
         if (!(getDialog() instanceof BottomSheetDialog)) return;
         BottomSheetDialog dialog = (BottomSheetDialog) getDialog();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
         View sheet = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
         if (sheet == null) return;
         float fraction;
         if (tool() == ToolKind.CHAT) fraction = 0.82f;
         else if (tool() == ToolKind.ANALYZE || tool() == ToolKind.DRAFT) fraction = 0.58f;
         else fraction = 0.50f;
-        int height = (int) (Resources.getSystem().getDisplayMetrics().heightPixels * fraction);
+        int height = (int) (getResources().getDisplayMetrics().heightPixels * fraction);
         sheet.getLayoutParams().height = height;
         sheet.requestLayout();
         BottomSheetBehavior.from(sheet).setState(BottomSheetBehavior.STATE_EXPANDED);
@@ -143,11 +170,17 @@ abstract class ToolSheet extends BottomSheetDialogFragment {
 
     protected void askAi(List<DocumentModel> sources, String instruction, TextView output,
                          View action) {
-        askAi(sources, instruction, output, action, null);
+        askAi(sources, instruction, output, action, null, null);
     }
 
     protected void askAi(List<DocumentModel> sources, String instruction, TextView output,
                          View action, Runnable afterSuccess) {
+        askAi(sources, instruction, output, action, afterSuccess, null);
+    }
+
+    protected void askAi(List<DocumentModel> sources, String instruction, TextView output,
+                         View action, @Nullable Runnable afterSuccess,
+                         @Nullable Runnable afterFinish) {
         if (ai == null || aiBusy) return;
         aiBusy = true;
         action.setEnabled(false);
@@ -159,14 +192,31 @@ abstract class ToolSheet extends BottomSheetDialogFragment {
                 action.setEnabled(true);
                 aiBusy = false;
                 if (afterSuccess != null) afterSuccess.run();
+                if (afterFinish != null) afterFinish.run();
             }
             @Override public void onError(String message) {
                 if (binding == null) return;
                 output.setText(message);
                 action.setEnabled(true);
                 aiBusy = false;
+                if (afterFinish != null) afterFinish.run();
             }
         });
+    }
+
+    protected void copySensitiveText(int labelRes, CharSequence text, int snackbarRes) {
+        if (binding == null) return;
+        ClipboardManager clipboard = (ClipboardManager) requireContext()
+                .getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard == null) return;
+        ClipData clip = ClipData.newPlainText(getString(labelRes), text);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            PersistableBundle extras = new PersistableBundle();
+            extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true);
+            clip.getDescription().setExtras(extras);
+        }
+        clipboard.setPrimaryClip(clip);
+        Snackbar.make(binding.getRoot(), snackbarRes, Snackbar.LENGTH_SHORT).show();
     }
 
     @Override public void onDestroyView() {

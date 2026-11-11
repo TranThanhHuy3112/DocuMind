@@ -1,71 +1,229 @@
 rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: communityPosts
+// Document ID: {uid}_{uuid}
+// Fields:
+//   - authorUid: string (required, immutable, == request.auth.uid)
+//   - author: string (required, immutable, 1..80 chars, == request.auth.token.name)
+//   - title: string (required, immutable, 1..120 chars)
+//   - category: string (required, immutable, in ['STUDY', 'DATA', 'WORK', 'OTHER'])
+//   - content: string (required, immutable, 1..2000 chars)
+//   - createdAt: int (required, immutable, recent epoch millis)
+//   - comments: list<map> (required, max 100 entries; append-only for verified users)
+//   - voters: list<string> (required, max 1000 entries; single-uid append-only)
+//
+// Collection: users
+// Document ID: {uid}
+// Fields:
+//   - fullName: string (required, 1..80 chars)
+//   - email: string (required, immutable, 1..254 chars, == request.auth.token.email on create)
+//   - createdAt: int (required, immutable, recent epoch millis on create)
+//
+// Subcollection: users/{uid}/documents
+// Document ID: {documentId} (1..128 chars)
+// Fields (optional metadata subset matching DocumentModel, max 10 keys):
+//   - id: string (1..128 chars)
+//   - name: string (1..255 chars)
+//   - size: int (0..104857600)
+//   - extension: string (1..16 chars)
+//   - mimeType: string (1..128 chars)
+//   - progress: int (0..100)
+//   - ready: bool
+//   - failed: bool
+//   - path: string (1..1024 chars)
+//   - createdAt: int (immutable after set, recent epoch millis when set)
+//
+// Server-only collections (Admin SDK only):
+//   - _otpChallenges/{uid}
+//   - _passwordResetChallenges/{id}
+//   - _otpRequestLimits/{id}
+//
+// ===============================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
     function owner(uid) {
-      return request.auth != null && request.auth.uid == uid;
+      return isAuthenticated() && request.auth.uid == uid;
     }
+
     function verified() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return isAuthenticated() && request.auth.token.email_verified == true;
     }
+
+    function recentMillis(ms) {
+      return ms is int
+        && ms <= request.time.toMillis() + 60000
+        && ms >= request.time.toMillis() - 300000;
+    }
+
+    function validTokenName() {
+      return 'name' in request.auth.token
+        && request.auth.token.name is string
+        && request.auth.token.name.size() > 0
+        && request.auth.token.name.size() <= 80;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
     function validComment(comment) {
       return comment is map
+        && comment.keys().hasAll(['id', 'authorUid', 'author', 'content', 'createdAt'])
         && comment.keys().hasOnly(['id', 'authorUid', 'author', 'content', 'createdAt'])
         && comment.id is string && comment.id.size() > 0 && comment.id.size() <= 80
         && comment.authorUid == request.auth.uid
+        && validTokenName()
         && comment.author == request.auth.token.name
         && comment.content is string && comment.content.size() > 0
         && comment.content.size() <= 500
-        && comment.createdAt is int;
+        && recentMillis(comment.createdAt);
     }
+
+    function isValidNewPost(data, postId) {
+      return data.keys().hasAll(['authorUid', 'author', 'title',
+          'category', 'content', 'createdAt', 'comments', 'voters'])
+        && data.keys().hasOnly(['authorUid', 'author', 'title',
+          'category', 'content', 'createdAt', 'comments', 'voters'])
+        && data.authorUid == request.auth.uid
+        && validTokenName()
+        && data.author == request.auth.token.name
+        && postId.size() == request.auth.uid.size() + 37
+        && postId[0:request.auth.uid.size() + 1] == request.auth.uid + '_'
+        && postId[request.auth.uid.size() + 1:postId.size()].matches('[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 120
+        && data.content is string
+        && data.content.size() > 0
+        && data.content.size() <= 2000
+        && data.category in ['STUDY', 'DATA', 'WORK', 'OTHER']
+        && recentMillis(data.createdAt)
+        && data.comments == []
+        && data.voters == [];
+    }
+
+    function isValidPostCommentAppend() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comments'])
+        && request.resource.data.comments is list
+        && resource.data.comments is list
+        && request.resource.data.comments.size() == resource.data.comments.size() + 1
+        && request.resource.data.comments.size() <= 100
+        && (resource.data.comments.size() == 0
+          || request.resource.data.comments[0:resource.data.comments.size()] == resource.data.comments)
+        && validComment(request.resource.data.comments[resource.data.comments.size()]);
+    }
+
+    function isValidPostVote() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voters'])
+        && request.resource.data.voters is list
+        && resource.data.voters is list
+        && request.resource.data.voters.size() == resource.data.voters.size() + 1
+        && request.resource.data.voters.size() <= 1000
+        && (resource.data.voters.size() == 0
+          || request.resource.data.voters[0:resource.data.voters.size()] == resource.data.voters)
+        && request.resource.data.voters[resource.data.voters.size()] == request.auth.uid
+        && !resource.data.voters.hasAny([request.auth.uid]);
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['fullName', 'email', 'createdAt'])
+        && data.keys().hasOnly(['fullName', 'email', 'createdAt'])
+        && data.fullName is string
+        && data.fullName.size() > 0
+        && data.fullName.size() <= 80
+        && data.email is string
+        && data.email.size() > 0
+        && data.email.size() <= 254
+        && data.createdAt is int;
+    }
+
+    function isValidUserDocument(data) {
+      return data.keys().size() > 0
+        && data.keys().size() <= 10
+        && data.keys().hasOnly(['id', 'name', 'size', 'extension', 'mimeType',
+          'progress', 'ready', 'failed', 'path', 'createdAt'])
+        && (!('id' in data) || (data.id is string && data.id.size() > 0 && data.id.size() <= 128))
+        && (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 255))
+        && (!('size' in data) || (data.size is int && data.size >= 0 && data.size <= 104857600))
+        && (!('extension' in data) || (data.extension is string && data.extension.size() > 0 && data.extension.size() <= 16))
+        && (!('mimeType' in data) || (data.mimeType is string && data.mimeType.size() > 0 && data.mimeType.size() <= 128))
+        && (!('progress' in data) || (data.progress is int && data.progress >= 0 && data.progress <= 100))
+        && (!('ready' in data) || data.ready is bool)
+        && (!('failed' in data) || data.failed is bool)
+        && (!('path' in data) || (data.path is string && data.path.size() > 0 && data.path.size() <= 1024))
+        && (!('createdAt' in data) || data.createdAt is int);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
     match /communityPosts/{postId} {
       allow read: if verified();
-      allow create: if verified()
-        && request.resource.data.keys().hasOnly(['authorUid', 'author', 'title',
-          'category', 'content', 'createdAt', 'comments', 'voters'])
-        && request.resource.data.authorUid == request.auth.uid
-        && request.resource.data.author == request.auth.token.name
-        && postId.matches(request.auth.uid + '_[a-f0-9-]{36}')
-        && request.resource.data.title is string
-        && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 120
-        && request.resource.data.content is string
-        && request.resource.data.content.size() > 0
-        && request.resource.data.content.size() <= 2000
-        && request.resource.data.category in ['STUDY', 'DATA', 'WORK', 'OTHER']
-        && request.resource.data.createdAt is int
-        && request.resource.data.comments == []
-        && request.resource.data.voters == [];
-      allow update: if verified() && (
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comments'])
-          && request.resource.data.comments is list
-          && resource.data.comments is list
-          && request.resource.data.comments.size() == resource.data.comments.size() + 1
-          && request.resource.data.comments.size() <= 100
-          && request.resource.data.comments.hasAll(resource.data.comments)
-          && validComment(request.resource.data.comments[resource.data.comments.size()]))
-        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voters'])
-          && request.resource.data.voters is list
-          && resource.data.voters is list
-          && request.resource.data.voters.size() == resource.data.voters.size() + 1
-          && request.resource.data.voters.size() <= 1000
-          && request.resource.data.voters.hasAll(resource.data.voters)
-          && !resource.data.voters.hasAny([request.auth.uid])
-          && request.resource.data.voters.hasAny([request.auth.uid])));
+      allow create: if verified() && isValidNewPost(request.resource.data, postId);
+      allow update: if verified()
+        && (isValidPostCommentAppend()
+          || isValidPostVote());
       allow delete: if verified() && resource.data.authorUid == request.auth.uid;
     }
+
     match /users/{uid} {
-      allow read, write: if owner(uid);
+      allow read: if owner(uid);
+      allow create: if owner(uid)
+        && isValidUserProfile(request.resource.data)
+        && 'email' in request.auth.token
+        && request.resource.data.email == request.auth.token.email
+        && recentMillis(request.resource.data.createdAt);
+      allow update: if owner(uid)
+        && verified()
+        && isValidUserProfile(request.resource.data)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if owner(uid) && verified();
+
       match /documents/{documentId} {
-        allow read, write: if owner(uid) && request.auth.token.email_verified == true;
+        allow read, delete: if owner(uid) && verified();
+        allow create: if owner(uid)
+          && verified()
+          && documentId.size() <= 128
+          && isValidUserDocument(request.resource.data)
+          && (!('createdAt' in request.resource.data)
+            || recentMillis(request.resource.data.createdAt));
+        allow update: if owner(uid)
+          && verified()
+          && isValidUserDocument(request.resource.data)
+          && (('createdAt' in resource.data
+              && 'createdAt' in request.resource.data
+              && request.resource.data.createdAt == resource.data.createdAt)
+            || (!('createdAt' in resource.data)
+              && (!('createdAt' in request.resource.data)
+                || recentMillis(request.resource.data.createdAt))));
       }
     }
+
     match /_otpChallenges/{uid} {
       allow read, write: if false;
     }
+
     match /_passwordResetChallenges/{id} {
       allow read, write: if false;
     }
+
     match /_otpRequestLimits/{id} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
       allow read, write: if false;
     }
   }

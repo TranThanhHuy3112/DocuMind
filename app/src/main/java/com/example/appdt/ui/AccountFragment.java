@@ -1,17 +1,22 @@
 package com.example.appdt.ui;
 
-import android.content.res.Configuration;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
+import android.text.InputFilter;
+import android.text.InputType;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.fragment.app.Fragment;
 
+import com.example.appdt.MainActivity;
 import com.example.appdt.R;
 import com.example.appdt.databinding.FragmentAccountBinding;
 import com.example.appdt.model.AccentColor;
@@ -22,7 +27,6 @@ import com.example.appdt.repository.SettingsRepository;
 import com.example.appdt.repository.WorkspaceRepository;
 import com.example.appdt.repository.AuthRepository;
 import com.example.appdt.model.UserModel;
-import com.example.appdt.ui.auth.RegisterActivity;
 import com.example.appdt.ui.auth.LoginActivity;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
@@ -35,6 +39,7 @@ public final class AccountFragment extends Fragment {
     private FragmentAccountBinding binding;
     private SettingsRepository settings;
     private AuthRepository authRepository;
+    private AlertDialog editNameDialog;
 
     @Nullable @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup parent,
@@ -47,21 +52,10 @@ public final class AccountFragment extends Fragment {
         super.onViewCreated(view, state);
         settings = new SettingsRepository(requireContext());
         authRepository = new AuthRepository(requireContext());
-        binding.accountLogin.setOnClickListener(ignored ->
-                startActivity(new Intent(requireContext(), LoginActivity.class)));
-        binding.accountCreateAccount.setOnClickListener(ignored ->
-                startActivity(new Intent(requireContext(), RegisterActivity.class)));
-        binding.accountLogout.setOnClickListener(ignored -> {
-            CommunityRepository.getInstance().clearSession();
-            authRepository.logout();
-            Intent intent = new Intent(requireContext(), LoginActivity.class)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(intent);
-            requireActivity().finish();
-        });
+        binding.accountLogout.setOnClickListener(ignored -> logoutAndExit());
         binding.accountEditName.setOnClickListener(ignored -> editName());
         renderUser();
-        binding.accountDarkMode.setChecked(isDarkMode());
+        binding.accountDarkMode.setChecked(SettingsRepository.isDarkMode(requireContext()));
         binding.accountDarkMode.setOnCheckedChangeListener((button, checked) -> {
             int mode = checked ? AppCompatDelegate.MODE_NIGHT_YES
                     : AppCompatDelegate.MODE_NIGHT_NO;
@@ -91,11 +85,23 @@ public final class AccountFragment extends Fragment {
         WorkspaceRepository.getInstance().getDocuments().observe(getViewLifecycleOwner(), docs ->
                 binding.accountDocumentCount.setText(
                         getString(R.string.account_document_count, docs.size())));
-        CommunityRepository.getInstance().getPosts().observe(getViewLifecycleOwner(), posts -> {
+        CommunityRepository community = CommunityRepository.getInstance();
+        community.startListening();
+        community.getPosts().observe(getViewLifecycleOwner(), posts -> {
             int ownPosts = 0;
-            for (PostModel post : posts) if (post.getAuthor().equals("Bạn")) ownPosts++;
+            for (PostModel post : posts) if (post.isOwn()) ownPosts++;
             binding.accountPostCount.setText(getString(R.string.account_post_count, ownPosts));
         });
+    }
+
+    private void logoutAndExit() {
+        WorkspaceRepository.getInstance().clearSession();
+        CommunityRepository.getInstance().clearSession();
+        authRepository.logout();
+        Intent intent = new Intent(requireContext(), LoginActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(intent);
+        requireActivity().finish();
     }
 
     @Override public void onResume() {
@@ -105,18 +111,11 @@ public final class AccountFragment extends Fragment {
 
     private void renderUser() {
         UserModel user = authRepository.getCurrentUser();
-        boolean signedIn = user != null;
-        binding.accountLogin.setVisibility(signedIn ? View.GONE : View.VISIBLE);
-        binding.accountCreateAccount.setVisibility(signedIn ? View.GONE : View.VISIBLE);
-        binding.accountLogout.setVisibility(signedIn ? View.VISIBLE : View.GONE);
-        binding.accountEditName.setVisibility(signedIn ? View.VISIBLE : View.GONE);
-        if (!signedIn) {
-            binding.accountName.setText(R.string.account_profile_name);
-            binding.accountEmail.setText(R.string.account_profile_note);
-            binding.accountAvatar.setText(R.string.brand_mark);
-            binding.accountVerificationNote.setVisibility(View.GONE);
+        if (user == null) {
+            logoutAndExit();
             return;
         }
+        binding.accountAvatar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         String name = user.getFullName().trim();
         binding.accountName.setText(name);
         binding.accountEmail.setText(user.getEmail());
@@ -134,40 +133,53 @@ public final class AccountFragment extends Fragment {
     private void editName() {
         UserModel current = authRepository.getCurrentUser();
         if (current == null) return;
+        if (editNameDialog != null && editNameDialog.isShowing()) editNameDialog.dismiss();
         TextInputLayout layout = new TextInputLayout(requireContext());
         layout.setHint(R.string.account_name_hint);
         layout.setPadding(24, 8, 24, 0);
         TextInputEditText input = new TextInputEditText(layout.getContext());
         input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME
+                | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            input.setAutofillHints(View.AUTOFILL_HINT_NAME);
+        }
+        input.setFilters(new InputFilter[] { new InputFilter.LengthFilter(80) });
         input.setText(current.getFullName());
         layout.addView(input);
-        androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(requireContext())
+        AlertDialog dialog = new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.account_edit_name)
                 .setView(layout)
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.account_save_name, null)
                 .create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(-1).setOnClickListener(view -> {
-            String name = input.getText() == null ? "" : input.getText().toString().trim();
-            if (name.isEmpty() || name.length() > 80) {
-                layout.setError(getString(R.string.account_name_invalid));
-                return;
-            }
-            dialog.getButton(-1).setEnabled(false);
-            authRepository.updateDisplayName(name, saved -> {
-                if (binding == null) return;
-                dialog.getButton(-1).setEnabled(true);
-                if (saved) { dialog.dismiss(); renderUser(); }
-                else Snackbar.make(binding.getRoot(), R.string.account_name_save_error,
-                        Snackbar.LENGTH_LONG).show();
+        editNameDialog = dialog;
+        dialog.setOnShowListener(ignored -> {
+            Button positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            if (positive == null) return;
+            positive.setFilterTouchesWhenObscured(true);
+            positive.setOnClickListener(view -> {
+                String name = input.getText() == null ? "" : input.getText().toString().trim();
+                if (name.isEmpty() || name.length() > 80) {
+                    layout.setError(getString(R.string.account_name_invalid));
+                    return;
+                }
+                positive.setEnabled(false);
+                authRepository.updateDisplayName(name, saved -> {
+                    if (binding == null || !isAdded() || !dialog.isShowing()) return;
+                    positive.setEnabled(true);
+                    if (saved) {
+                        dialog.dismiss();
+                        renderUser();
+                        if (getActivity() instanceof MainActivity) {
+                            ((MainActivity) getActivity()).refreshUserSubtitle();
+                        }
+                    } else Snackbar.make(binding.getRoot(), R.string.account_name_save_error,
+                            Snackbar.LENGTH_LONG).show();
+                });
             });
-        }));
+        });
         dialog.show();
-    }
-
-    private boolean isDarkMode() {
-        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
-                == Configuration.UI_MODE_NIGHT_YES;
     }
 
     private int chipId(AccentColor accent) {
@@ -189,6 +201,9 @@ public final class AccountFragment extends Fragment {
     }
 
     @Override public void onDestroyView() {
+        CommunityRepository.getInstance().stopListening();
+        if (editNameDialog != null && editNameDialog.isShowing()) editNameDialog.dismiss();
+        editNameDialog = null;
         binding = null;
         super.onDestroyView();
     }

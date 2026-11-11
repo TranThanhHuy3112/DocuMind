@@ -1,21 +1,20 @@
 package com.example.appdt.ui;
 
-import android.content.ContentResolver;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.SearchView;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
@@ -35,15 +34,16 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.snackbar.Snackbar;
 
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class FilesFragment extends Fragment {
+    private static final String STATE_QUERY = "files_query";
+    private static final String STATE_CATEGORY = "files_category";
+    private static final String STATE_ASCENDING = "files_ascending";
+
     private FragmentFilesBinding binding;
     private WorkspaceViewModel viewModel;
     private DocumentAdapter adapter;
-    private ExecutorService metadataExecutor;
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private AlertDialog deleteDialog;
     private String query = "";
     private DocumentCategory selectedCategory;
     private boolean ascending = true;
@@ -56,13 +56,24 @@ public class FilesFragment extends Fragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
                              @Nullable Bundle savedInstanceState) {
         binding = FragmentFilesBinding.inflate(inflater, container, false);
-        metadataExecutor = Executors.newSingleThreadExecutor();
         return binding.getRoot();
     }
 
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+        if (savedInstanceState != null) {
+            query = savedInstanceState.getString(STATE_QUERY, "");
+            String savedCategory = savedInstanceState.getString(STATE_CATEGORY);
+            if (savedCategory != null) {
+                try {
+                    selectedCategory = DocumentCategory.valueOf(savedCategory);
+                } catch (IllegalArgumentException ignored) {
+                    selectedCategory = null;
+                }
+            }
+            ascending = savedInstanceState.getBoolean(STATE_ASCENDING, true);
+        }
         viewModel = new ViewModelProvider(requireActivity()).get(WorkspaceViewModel.class);
         adapter = new DocumentAdapter(this::confirmDelete);
         binding.documentsList.setLayoutManager(new LinearLayoutManager(requireContext()));
@@ -71,6 +82,15 @@ public class FilesFragment extends Fragment {
         setupSearchAndFilters();
         setupQuickActions();
         viewModel.getDocuments().observe(getViewLifecycleOwner(), this::renderDocuments);
+        viewModel.getImportFeedback().observe(getViewLifecycleOwner(), this::showImportFeedback);
+    }
+
+    @Override
+    public void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString(STATE_QUERY, query);
+        if (selectedCategory != null) outState.putString(STATE_CATEGORY, selectedCategory.name());
+        outState.putBoolean(STATE_ASCENDING, ascending);
     }
 
     private void setupSearchAndFilters() {
@@ -78,6 +98,7 @@ public class FilesFragment extends Fragment {
         View searchPlate = binding.documentSearch.findViewById(
                 androidx.appcompat.R.id.search_plate);
         if (searchPlate != null) searchPlate.setBackgroundColor(Color.TRANSPARENT);
+        if (!query.isEmpty()) binding.documentSearch.setQuery(query, false);
         binding.documentSearch.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override public boolean onQueryTextSubmit(String text) {
                 binding.documentSearch.clearFocus();
@@ -90,6 +111,7 @@ public class FilesFragment extends Fragment {
             }
         });
         binding.documentSearch.clearFocus();
+        binding.fileFilters.check(chipForCategory(selectedCategory));
         binding.fileFilters.setOnCheckedStateChangeListener((group, checkedIds) -> {
             int id = checkedIds.isEmpty() ? R.id.filter_all : checkedIds.get(0);
             if (id == R.id.filter_pdf) selectedCategory = DocumentCategory.PDF;
@@ -103,6 +125,7 @@ public class FilesFragment extends Fragment {
                 R.array.file_sort_options, android.R.layout.simple_spinner_item);
         sortAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         binding.fileSort.setAdapter(sortAdapter);
+        binding.fileSort.setSelection(ascending ? 0 : 1, false);
         binding.fileSort.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View item,
                                                  int position, long id) {
@@ -111,6 +134,14 @@ public class FilesFragment extends Fragment {
             }
             @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
+    }
+
+    private static int chipForCategory(@Nullable DocumentCategory category) {
+        if (category == DocumentCategory.PDF) return R.id.filter_pdf;
+        if (category == DocumentCategory.TEXT) return R.id.filter_text;
+        if (category == DocumentCategory.SPREADSHEET) return R.id.filter_sheet;
+        if (category == DocumentCategory.MEDIA) return R.id.filter_media;
+        return R.id.filter_all;
     }
 
     private void setupQuickActions() {
@@ -159,45 +190,36 @@ public class FilesFragment extends Fragment {
     }
 
     private void onDocumentsSelected(List<Uri> uris) {
-        if (uris == null || uris.isEmpty() || metadataExecutor == null
-                || metadataExecutor.isShutdown()) return;
-        ContentResolver resolver = requireContext().getApplicationContext().getContentResolver();
-        String fallbackName = getString(R.string.unnamed_document);
-        metadataExecutor.execute(() -> {
-            for (Uri uri : uris) {
-                if (Thread.currentThread().isInterrupted()) return;
-                DocumentModel document = DocumentPicker.readMetadata(resolver, uri, fallbackName);
-                mainHandler.post(() -> addDocument(document, resolver));
-            }
-        });
+        if (uris == null || uris.isEmpty() || !isAdded()) return;
+        viewModel.importDocuments(uris,
+                requireContext().getApplicationContext().getContentResolver(),
+                getString(R.string.unnamed_document));
     }
 
-    private void addDocument(DocumentModel document, ContentResolver resolver) {
-        if (binding == null || !isAdded()) return;
-        if (!DocumentPicker.isSupported(document)) {
-            showMessage(R.string.unsupported_document);
-            return;
-        }
-        WorkspaceRepository.AddResult result = viewModel.addDocument(document, resolver);
-        if (result == WorkspaceRepository.AddResult.ADDED) {
-            DocumentPicker.keepReadPermission(resolver, Uri.parse(document.getPath()));
-            Snackbar.make(binding.getRoot(),
-                    getString(R.string.document_added, document.getName()),
-                    Snackbar.LENGTH_SHORT).show();
-        } else {
-            showMessage(result == WorkspaceRepository.AddResult.DUPLICATE
-                    ? R.string.duplicate_document : R.string.workspace_full);
-        }
+    private void showImportFeedback(@Nullable WorkspaceViewModel.ImportFeedback feedback) {
+        if (feedback == null || binding == null) return;
+        String text = feedback.documentName != null
+                ? getString(feedback.messageRes, feedback.documentName)
+                : getString(feedback.messageRes);
+        Snackbar.make(binding.getRoot(), text,
+                feedback.shortDuration ? Snackbar.LENGTH_SHORT : Snackbar.LENGTH_LONG).show();
+        viewModel.clearImportFeedback();
     }
 
     private void confirmDelete(DocumentModel document) {
-        new MaterialAlertDialogBuilder(requireContext())
+        if (deleteDialog != null && deleteDialog.isShowing()) deleteDialog.dismiss();
+        deleteDialog = new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.delete_confirm_title)
                 .setMessage(getString(R.string.delete_confirm_message, document.getName()))
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.delete,
                         (dialog, which) -> viewModel.removeDocument(document.getId()))
-                .show();
+                .create();
+        deleteDialog.setOnShowListener(ignored -> {
+            Button positive = deleteDialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            if (positive != null) positive.setFilterTouchesWhenObscured(true);
+        });
+        deleteDialog.show();
     }
 
     private void showMessage(int message) {
@@ -206,9 +228,8 @@ public class FilesFragment extends Fragment {
 
     @Override
     public void onDestroyView() {
-        metadataExecutor.shutdownNow();
-        metadataExecutor = null;
-        mainHandler.removeCallbacksAndMessages(null);
+        if (deleteDialog != null && deleteDialog.isShowing()) deleteDialog.dismiss();
+        deleteDialog = null;
         binding.documentsList.setAdapter(null);
         binding = null;
         super.onDestroyView();

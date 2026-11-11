@@ -69,6 +69,9 @@ public final class RegisterActivity extends BaseAuthActivity {
         if (name.isEmpty()) {
             binding.registerNameLayout.setError(getString(R.string.auth_error_name));
             firstError = binding.registerNameLayout;
+        } else if (name.length() > 80) {
+            binding.registerNameLayout.setError(getString(R.string.account_name_invalid));
+            firstError = binding.registerNameLayout;
         }
         if (!AuthRepository.isValidEmail(email)) {
             binding.registerEmailLayout.setError(getString(R.string.auth_error_email));
@@ -126,8 +129,7 @@ public final class RegisterActivity extends BaseAuthActivity {
                 break;
             default:
                 showMessage(binding.registerMessage, error == AuthResult.Error.OTP_LOCKED
-                        ? R.string.auth_error_otp_locked : error == AuthResult.Error.FIREBASE_SETUP
-                        ? R.string.auth_error_firebase_setup : R.string.auth_error_storage);
+                        ? R.string.auth_error_otp_locked : R.string.auth_error_storage);
                 break;
         }
     }
@@ -135,11 +137,6 @@ public final class RegisterActivity extends BaseAuthActivity {
     @Override protected void onSaveInstanceState(Bundle outState) {
         outState.putBoolean(NAVIGATED, navigated);
         super.onSaveInstanceState(outState);
-    }
-
-    @Override protected void onStop() {
-        viewModel.stopCountdown();
-        super.onStop();
     }
 
     @Override protected void onDestroy() {

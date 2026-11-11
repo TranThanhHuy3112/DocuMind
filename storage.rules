@@ -2,8 +2,26 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     match /users/{uid}/documents/{documentId} {
-      allow read, write: if request.auth != null && request.auth.uid == uid
-        && request.auth.token.email_verified == true;
+      allow read, delete: if request.auth != null && request.auth.uid == uid
+        && request.auth.token.email_verified == true
+        && documentId.size() > 0
+        && documentId.size() <= 128;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.auth.token.email_verified == true
+        && documentId.size() > 0
+        && documentId.size() <= 128
+        && request.resource != null
+        && request.resource.size > 0
+        && request.resource.size <= 10 * 1024 * 1024
+        && (request.resource.metadata == null || request.resource.metadata.size() == 0)
+        && request.resource.contentType != null
+        && request.resource.contentType.matches(
+          'application/pdf|text/(plain|csv)(;\\s*charset=[A-Za-z0-9._-]+)?|application/msword|application/vnd\\.ms-excel|application/vnd\\.openxmlformats-officedocument\\.(wordprocessingml\\.document|spreadsheetml\\.sheet)|audio/(mpeg|wav|mp4|x-wav|aac|ogg|x-m4a|webm)|video/(mp4|quicktime|webm)'
+        );
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

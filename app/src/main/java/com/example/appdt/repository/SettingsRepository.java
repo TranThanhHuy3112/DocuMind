@@ -2,7 +2,13 @@ package com.example.appdt.repository;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
+import android.view.WindowManager;
+
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
+
+import com.example.appdt.R;
 import com.example.appdt.model.AccentColor;
 import com.example.appdt.model.DisplayDensity;
 
@@ -13,6 +19,20 @@ public final class SettingsRepository {
     public SettingsRepository(Context context) {
         preferences = context.getApplicationContext()
                 .getSharedPreferences("documind_settings", Context.MODE_PRIVATE);
+    }
+
+    public static SettingsRepository applyThemeAndSecureWindow(AppCompatActivity activity) {
+        SettingsRepository settings = new SettingsRepository(activity);
+        AppCompatDelegate.setDefaultNightMode(settings.getNightMode());
+        activity.setTheme(R.style.Theme_DocuMind);
+        activity.getTheme().applyStyle(settings.getAccent().getThemeOverlay(), true);
+        activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        return settings;
+    }
+
+    public static boolean isDarkMode(Context context) {
+        return (context.getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
     }
 
     public AccentColor getAccent() {

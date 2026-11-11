@@ -30,3 +30,22 @@ test("five wrong attempts lock even if the sixth code is correct", () => {
   assert.equal(evaluateChallenge(state, state.email, hash,
       now + 1, 5, 180_000).error, "OTP_LOCKED");
 });
+
+test("malformed non-string challenge hash returns MISSING without throwing", () => {
+  const malformed = {...challenge, hash: null};
+  assert.equal(evaluateChallenge(malformed, challenge.email, hash,
+      now, 5, 180_000).error, "MISSING");
+});
+
+test("expired lock resets previous attempts instead of relocking on first mistake", () => {
+  const expiredLock = {
+    ...challenge,
+    attempts: 5,
+    lockedUntil: now - 1,
+    expiresAt: now + 60_000,
+  };
+  const decision = evaluateChallenge(expiredLock, challenge.email, wrong, now, 5, 180_000);
+  assert.equal(decision.error, "INVALID_OTP");
+  assert.equal(decision.attempts, 1);
+  assert.equal(decision.attemptsRemaining, 4);
+});
