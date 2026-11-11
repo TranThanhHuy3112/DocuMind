@@ -67,6 +67,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
+            android:filterTouchesWhenObscured="true"
             android:text="@string/auth_verify_button" />
 
         <com.google.android.material.button.MaterialButton
@@ -75,6 +76,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
+            android:filterTouchesWhenObscured="true"
             android:text="@string/auth_resend_wait" />
 
         <com.google.android.material.button.MaterialButton
@@ -83,6 +85,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
+            android:filterTouchesWhenObscured="true"
             android:text="@string/auth_back_to_login" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

@@ -79,12 +79,19 @@ public final class CreatePostDialog extends BottomSheetDialogFragment {
         boolean canAttach = CommunityRepository.getInstance().supportsSharedAttachments();
         binding.createPostAttachment.setVisibility(canAttach ? View.VISIBLE : View.GONE);
         if (!canAttach) binding.createPostAttachmentName.setText(R.string.community_attachment_unavailable);
-        binding.createPostAttachment.setOnClickListener(ignored -> picker.launch(new String[]{"*/*"}));
+        binding.createPostAttachment.setOnClickListener(ignored -> picker.launch(DocumentPicker.mimeTypes()));
         binding.createPostSubmit.setOnClickListener(ignored -> publish());
     }
 
     private void onAttachmentChosen(Uri uri) {
-        if (uri == null || !isAdded()) return;
+        if (uri == null || !isAdded() || metadataExecutor.isShutdown()) return;
+        if (!DocumentPicker.isAllowedPickedUri(uri)) {
+            if (binding != null) {
+                Snackbar.make(binding.getRoot(), R.string.unsupported_document,
+                        Snackbar.LENGTH_LONG).show();
+            }
+            return;
+        }
         Context app = requireContext().getApplicationContext();
         ContentResolver resolver = app.getContentResolver();
         String fallbackName = getString(R.string.unnamed_document);
@@ -151,8 +158,11 @@ public final class CreatePostDialog extends BottomSheetDialogFragment {
                 getResources().getDisplayMetrics().heightPixels * 0.84f);
         sheet.requestLayout();
         BottomSheetBehavior.from(sheet).setState(BottomSheetBehavior.STATE_EXPANDED);
-        if (dialog.getWindow() != null) dialog.getWindow().setSoftInputMode(
-                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            dialog.getWindow().setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
     }
 
     @Override public void onDestroyView() {

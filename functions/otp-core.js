@@ -9,10 +9,15 @@ function evaluateChallenge(challenge, email, expectedHash, now, maxAttempts, loc
     return {error: "OTP_LOCKED", retryAt: challenge.lockedUntil};
   }
   if (challenge.expiresAt <= now) return {error: "OTP_EXPIRED"};
+  if (typeof challenge.hash !== "string" || typeof expectedHash !== "string") {
+    return {error: "MISSING"};
+  }
+  const priorAttempts = challenge.lockedUntil > 0 && challenge.lockedUntil <= now
+      ? 0 : (challenge.attempts || 0);
   const actual = Buffer.from(challenge.hash, "hex");
   const expected = Buffer.from(expectedHash, "hex");
   if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
-    const attempts = (challenge.attempts || 0) + 1;
+    const attempts = priorAttempts + 1;
     const retryAt = attempts >= maxAttempts ? now + lockMs : 0;
     return {error: retryAt ? "OTP_LOCKED" : "INVALID_OTP", attempts,
       attemptsRemaining: Math.max(0, maxAttempts - attempts), retryAt};

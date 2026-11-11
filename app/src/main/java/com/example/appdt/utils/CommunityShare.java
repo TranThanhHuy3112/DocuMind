@@ -15,7 +15,7 @@ public final class CommunityShare {
         intent.putExtra(Intent.EXTRA_SUBJECT, post.getTitle());
         intent.putExtra(Intent.EXTRA_TEXT, post.getTitle() + "\n\n" + post.getContent());
         PostAttachment attachment = post.getAttachment();
-        if (attachment == null) {
+        if (attachment == null || !"content".equalsIgnoreCase(attachment.getUri().getScheme())) {
             intent.setType("text/plain");
         } else {
             intent.setType(attachment.getMimeType());

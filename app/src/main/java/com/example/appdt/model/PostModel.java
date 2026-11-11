@@ -17,10 +17,18 @@ public final class PostModel {
     private final PostAttachment attachment;
     private final List<CommentModel> comments;
     private final Set<String> helpfulVoters;
+    private final boolean own;
 
     public PostModel(String id, String title, PostCategory category, String author,
                      long createdAt, String content, PostAttachment attachment,
                      List<CommentModel> comments, Set<String> helpfulVoters) {
+        this(id, title, category, author, createdAt, content, attachment,
+                comments, helpfulVoters, "Bạn".equals(author));
+    }
+
+    public PostModel(String id, String title, PostCategory category, String author,
+                     long createdAt, String content, PostAttachment attachment,
+                     List<CommentModel> comments, Set<String> helpfulVoters, boolean own) {
         this.id = Objects.requireNonNull(id);
         this.title = Objects.requireNonNull(title);
         this.category = Objects.requireNonNull(category);
@@ -30,20 +38,21 @@ public final class PostModel {
         this.attachment = attachment;
         this.comments = Collections.unmodifiableList(new ArrayList<>(comments));
         this.helpfulVoters = Collections.unmodifiableSet(new HashSet<>(helpfulVoters));
+        this.own = own;
     }
 
     public PostModel withComment(CommentModel comment) {
         List<CommentModel> updated = new ArrayList<>(comments);
         updated.add(comment);
         return new PostModel(id, title, category, author, createdAt, content,
-                attachment, updated, helpfulVoters);
+                attachment, updated, helpfulVoters, own);
     }
 
     public PostModel withHelpfulVote(String userId) {
         Set<String> updated = new HashSet<>(helpfulVoters);
         updated.add(userId);
         return new PostModel(id, title, category, author, createdAt, content,
-                attachment, comments, updated);
+                attachment, comments, updated, own);
     }
 
     public String getId() { return id; }
@@ -57,19 +66,21 @@ public final class PostModel {
     public int getHelpfulCount() { return helpfulVoters.size(); }
     public Set<String> getHelpfulVoters() { return helpfulVoters; }
     public boolean hasVoted(String userId) { return helpfulVoters.contains(userId); }
+    public boolean isOwn() { return own; }
 
     @Override public boolean equals(Object other) {
         if (this == other) return true;
         if (!(other instanceof PostModel)) return false;
         PostModel post = (PostModel) other;
-        return createdAt == post.createdAt && id.equals(post.id) && title.equals(post.title)
-                && category == post.category && author.equals(post.author)
-                && content.equals(post.content) && Objects.equals(attachment, post.attachment)
+        return own == post.own && createdAt == post.createdAt && id.equals(post.id)
+                && title.equals(post.title) && category == post.category
+                && author.equals(post.author) && content.equals(post.content)
+                && Objects.equals(attachment, post.attachment)
                 && comments.equals(post.comments) && helpfulVoters.equals(post.helpfulVoters);
     }
 
     @Override public int hashCode() {
         return Objects.hash(id, title, category, author, createdAt, content, attachment,
-                comments, helpfulVoters);
+                comments, helpfulVoters, own);
     }
 }

@@ -17,6 +17,8 @@ final class SecretHasher {
     private static final int HASH_BITS = 256;
     private static final int PASSWORD_ROUNDS = 120_000;
     private static final int OTP_ROUNDS = 20_000;
+    private static final int MAX_SECRET_LENGTH = 128;
+    private static final byte[] DUMMY_SALT = new byte[SALT_BYTES];
     private final SecureRandom random = new SecureRandom();
 
     String hashPassword(String value) throws GeneralSecurityException {
@@ -27,11 +29,28 @@ final class SecretHasher {
         return hash(value, OTP_ROUNDS);
     }
 
-    boolean matches(String value, String stored) throws GeneralSecurityException {
-        if (stored == null) return false;
+    void runDummyWork() {
+        try {
+            String tag = Build.VERSION.SDK_INT >= 26 ? "sha256" : "sha1";
+            derive("dummy-password", DUMMY_SALT, PASSWORD_ROUNDS, algorithmForTag(tag));
+        } catch (GeneralSecurityException ignored) { }
+    }
+
+    boolean matchesPassword(String value, String stored) throws GeneralSecurityException {
+        return matchesWithMinimumRounds(value, stored, PASSWORD_ROUNDS);
+    }
+
+    boolean matchesOtp(String value, String stored) throws GeneralSecurityException {
+        return matchesWithMinimumRounds(value, stored, OTP_ROUNDS);
+    }
+
+    private boolean matchesWithMinimumRounds(String value, String stored, int minRounds)
+            throws GeneralSecurityException {
+        if (value == null || value.length() > MAX_SECRET_LENGTH || stored == null) return false;
         String[] parts = stored.split("\\$", -1);
         boolean legacy = parts.length == 4 && "v1".equals(parts[0]);
         if (!legacy && (parts.length != 5 || !"v2".equals(parts[0]))) return false;
+        if (legacy && Build.VERSION.SDK_INT < 26) return false;
         String algorithm = legacy ? SHA256 : algorithmForTag(parts[1]);
         if (algorithm == null) return false;
         int offset = legacy ? 0 : 1;
@@ -40,7 +59,7 @@ final class SecretHasher {
         byte[] expected;
         try {
             rounds = Integer.parseInt(parts[1 + offset]);
-            if (rounds < OTP_ROUNDS || rounds > PASSWORD_ROUNDS) return false;
+            if (rounds < minRounds || rounds > PASSWORD_ROUNDS) return false;
             salt = Base64.decode(parts[2 + offset], Base64.NO_WRAP);
             expected = Base64.decode(parts[3 + offset], Base64.NO_WRAP);
         } catch (IllegalArgumentException exception) {
@@ -68,6 +87,9 @@ final class SecretHasher {
 
     private byte[] derive(String value, byte[] salt, int rounds, String algorithm)
             throws GeneralSecurityException {
+        if (value == null || value.length() > MAX_SECRET_LENGTH) {
+            throw new GeneralSecurityException("Secret length exceeds limit");
+        }
         PBEKeySpec spec = new PBEKeySpec(value.toCharArray(), salt, rounds, HASH_BITS);
         try {
             return SecretKeyFactory.getInstance(algorithm).generateSecret(spec).getEncoded();

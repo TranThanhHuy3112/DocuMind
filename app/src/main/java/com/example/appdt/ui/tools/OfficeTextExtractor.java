@@ -18,6 +18,8 @@ import java.util.zip.ZipInputStream;
 /** Extracts readable text from Office Open XML files without uploading the binary package. */
 final class OfficeTextExtractor {
     private static final int MAX_XML_BYTES = 8 * 1024 * 1024;
+    private static final int MAX_SHARED_STRINGS = 100_000;
+    private static final int MAX_EXCEL_COLUMN_INDEX = 16_383; // XFD
 
     private OfficeTextExtractor() { }
 
@@ -65,16 +67,19 @@ final class OfficeTextExtractor {
             int column = -1;
             int maxColumn = -1;
             boolean sharedCell = false;
+            StringBuilder cellText = null;
             int event;
             while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
                 if (event == XmlPullParser.START_TAG) {
                     String name = parser.getName();
                     if (name.equals("row")) {
-                        row.clear(); maxColumn = -1;
+                        row.clear(); maxColumn = -1; column = -1; cellText = null;
                     } else if (name.equals("c")) {
-                        column = columnIndex(parser.getAttributeValue(null, "r"));
+                        String ref = parser.getAttributeValue(null, "r");
+                        column = ref != null ? columnIndex(ref) : (column + 1);
                         sharedCell = "s".equals(parser.getAttributeValue(null, "t"));
-                    } else if ((name.equals("v") || name.equals("t")) && column >= 0) {
+                        cellText = new StringBuilder();
+                    } else if ((name.equals("v") || name.equals("t")) && column >= 0 && cellText != null) {
                         String value = parser.nextText();
                         if (sharedCell && name.equals("v")) {
                             try {
@@ -82,18 +87,33 @@ final class OfficeTextExtractor {
                                 value = index >= 0 && index < shared.size() ? shared.get(index) : "";
                             } catch (NumberFormatException ignored) { value = ""; }
                         }
-                        row.put(column, value);
-                        maxColumn = Math.max(maxColumn, column);
+                        cellText.append(value);
                     }
-                } else if (event == XmlPullParser.END_TAG && parser.getName().equals("row")) {
-                    if (maxColumn >= 0) {
-                        if (csv.length() > 0) csv.append('\n');
+                } else if (event == XmlPullParser.END_TAG) {
+                    String endName = parser.getName();
+                    if (endName.equals("c")) {
+                        if (column >= 0 && cellText != null) {
+                            row.put(column, cellText.toString());
+                            maxColumn = Math.max(maxColumn, column);
+                        }
+                        cellText = null;
+                    } else if (endName.equals("row") && maxColumn >= 0) {
+                        if (csv.length() > 0) {
+                            if (csv.length() + 1 > MAX_XML_BYTES) {
+                                throw new IOException("Bảng XLSX quá lớn.");
+                            }
+                            csv.append('\n');
+                        }
                         for (int i = 0; i <= Math.min(maxColumn, 100); i++) {
+                            String cell = quote(row.getOrDefault(i, ""));
+                            int separator = i > 0 ? 1 : 0;
+                            if (csv.length() + separator + cell.length() > MAX_XML_BYTES) {
+                                throw new IOException("Bảng XLSX quá lớn.");
+                            }
                             if (i > 0) csv.append(',');
-                            csv.append(quote(row.getOrDefault(i, "")));
+                            csv.append(cell);
                         }
                     }
-                    if (csv.length() > MAX_XML_BYTES) throw new IOException("Bảng XLSX quá lớn.");
                 }
             }
         } catch (XmlPullParserException error) {
@@ -105,16 +125,25 @@ final class OfficeTextExtractor {
     private static List<String> sharedStrings(byte[] xml) throws IOException {
         List<String> values = new ArrayList<>();
         if (xml == null) return values;
+        int totalChars = 0;
         try {
             XmlPullParser parser = xml(xml);
             StringBuilder item = null;
             int event;
             while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
                 if (event == XmlPullParser.START_TAG && parser.getName().equals("si")) {
+                    if (values.size() >= MAX_SHARED_STRINGS) {
+                        throw new IOException("Tệp XLSX có quá nhiều chuỗi.");
+                    }
                     item = new StringBuilder();
                 } else if (event == XmlPullParser.START_TAG && parser.getName().equals("t")
                         && item != null) {
-                    item.append(parser.nextText());
+                    String segment = parser.nextText();
+                    if (totalChars + segment.length() > MAX_XML_BYTES) {
+                        throw new IOException("Nội dung chuỗi XLSX quá lớn.");
+                    }
+                    totalChars += segment.length();
+                    item.append(segment);
                 } else if (event == XmlPullParser.END_TAG && parser.getName().equals("si")
                         && item != null) {
                     values.add(item.toString()); item = null;
@@ -160,12 +189,16 @@ final class OfficeTextExtractor {
     private static int columnIndex(String reference) {
         if (reference == null) return -1;
         int result = 0;
+        int letters = 0;
         for (int i = 0; i < reference.length(); i++) {
             char c = Character.toUpperCase(reference.charAt(i));
             if (c < 'A' || c > 'Z') break;
+            letters++;
+            if (letters > 3) return -1;
             result = result * 26 + c - 'A' + 1;
         }
-        return result - 1;
+        int index = result - 1;
+        return index >= 0 && index <= MAX_EXCEL_COLUMN_INDEX ? index : -1;
     }
 
     private static String quote(String value) {

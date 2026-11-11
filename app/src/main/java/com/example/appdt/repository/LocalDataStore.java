@@ -10,6 +10,7 @@ import com.example.appdt.model.PostAttachment;
 import com.example.appdt.model.PostCategory;
 import com.example.appdt.model.PostModel;
 import com.example.appdt.model.RecentActivityModel;
+import com.example.appdt.utils.DocumentPicker;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -28,13 +29,18 @@ public final class LocalDataStore {
     private static final String POSTS = "posts";
     private final SharedPreferences preferences;
 
-    public LocalDataStore(Context context) {
-        this(context, "documind_local_data");
+    public static LocalDataStore forAccount(Context context, String uid) {
+        return new LocalDataStore(SecurePrefs.open(context,
+                SecurePrefs.hashedName("documind_local_", uid)));
     }
 
     public LocalDataStore(Context context, String preferencesName) {
-        preferences = context.getApplicationContext()
-                .getSharedPreferences(preferencesName, Context.MODE_PRIVATE);
+        this(context.getApplicationContext()
+                .getSharedPreferences(preferencesName, Context.MODE_PRIVATE));
+    }
+
+    private LocalDataStore(SharedPreferences preferences) {
+        this.preferences = preferences;
     }
 
     public List<DocumentModel> loadDocuments() {
@@ -47,7 +53,8 @@ public final class LocalDataStore {
             String id = item.optString("id", "");
             String path = item.optString("path", "");
             String name = item.optString("name", "");
-            if (id.isEmpty() || path.isEmpty() || name.isEmpty()) continue;
+            if (id.isEmpty() || path.isEmpty() || name.isEmpty()
+                    || !DocumentPicker.isAllowedPickedUri(Uri.parse(path))) continue;
             result.add(new DocumentModel(id, name, item.optLong("size", -1L),
                     item.optString("extension", "file"),
                     item.optString("mime", "application/octet-stream"),
@@ -123,9 +130,12 @@ public final class LocalDataStore {
             PostAttachment attachment = null;
             JSONObject file = item.optJSONObject("attachment");
             if (file != null && !file.optString("uri", "").isEmpty()) {
-                attachment = new PostAttachment(Uri.parse(file.optString("uri")),
-                        file.optString("name", ""),
-                        file.optString("mime", "application/octet-stream"));
+                Uri parsedUri = Uri.parse(file.optString("uri"));
+                if (DocumentPicker.isAllowedPickedUri(parsedUri)) {
+                    attachment = new PostAttachment(parsedUri,
+                            file.optString("name", ""),
+                            file.optString("mime", "application/octet-stream"));
+                }
             }
             List<CommentModel> comments = new ArrayList<>();
             JSONArray savedComments = item.optJSONArray("comments");
@@ -146,9 +156,10 @@ public final class LocalDataStore {
                     if (!voter.isEmpty()) voters.add(voter);
                 }
             }
+            boolean own = item.optBoolean("own", "Bạn".equals(author));
             result.add(new PostModel(id, title, category, author,
                     item.optLong("createdAt"), item.optString("content", ""),
-                    attachment, comments, voters));
+                    attachment, comments, voters, own));
         }
         return Collections.unmodifiableList(result);
     }
@@ -164,6 +175,7 @@ public final class LocalDataStore {
                 item.put("author", post.getAuthor());
                 item.put("createdAt", post.getCreatedAt());
                 item.put("content", post.getContent());
+                item.put("own", post.isOwn());
                 PostAttachment attachment = post.getAttachment();
                 if (attachment != null) {
                     JSONObject file = new JSONObject();

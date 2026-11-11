@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const net = require("node:net");
 const {initializeApp} = require("firebase-admin/app");
 const {getAuth} = require("firebase-admin/auth");
 const {getFirestore} = require("firebase-admin/firestore");
@@ -20,7 +21,8 @@ const LOCK_MS = 180_000;
 const MAX_ATTEMPTS = 5;
 const RESET_RATE_WINDOW_MS = 3_600_000;
 const RESET_RATE_LIMIT = 120;
-const EMAIL_RESET_LIMIT = 5;
+const RESET_COOLDOWN_WINDOW_MS = 900_000;
+const MAX_RESET_COOLDOWN_MS = 300_000;
 
 function requireUser(request) {
   if (!request.auth) throw new HttpsError("unauthenticated", "SIGN_IN_REQUIRED");
@@ -49,17 +51,26 @@ function strongPassword(value) {
       /\p{Lu}/u.test(value) && /\p{Ll}/u.test(value) && /\p{Nd}/u.test(value);
 }
 
+let cachedTransport = null;
+let cachedTransportKey = "";
+
 async function sendCodeMail(email, code, purpose) {
   const config = mailConfig.value();
   if (!config || !config.host || !config.user || !config.password || !config.from) {
     throw new Error("SMTP_CONFIG_MISSING");
   }
   const port = Number(config.port || 465);
-  const transport = nodemailer.createTransport({
-    host: config.host, port, secure: port === 465,
-    auth: {user: config.user, pass: config.password},
-  });
-  await transport.sendMail({
+  const transportKey = crypto.createHash("sha256")
+      .update(JSON.stringify({host: config.host, port, user: config.user, password: config.password}))
+      .digest("hex");
+  if (!cachedTransport || cachedTransportKey !== transportKey) {
+    cachedTransport = nodemailer.createTransport({
+      host: config.host, port, secure: port === 465,
+      auth: {user: config.user, pass: config.password},
+    });
+    cachedTransportKey = transportKey;
+  }
+  await cachedTransport.sendMail({
     from: config.from, to: email,
     subject: purpose === "reset" ? "Mã đặt lại mật khẩu DocuMind" : "Mã xác minh DocuMind",
     text: purpose === "reset"
@@ -97,10 +108,53 @@ async function consumeChallenge(ref, email, code, hashId, missingError) {
   return verdict.challenge;
 }
 
+function extractTrustedClientIp(rawRequest) {
+  if (!rawRequest) return null;
+  const forwarded = rawRequest.headers && rawRequest.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    const parts = forwarded.split(",").map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 0 && net.isIP(parts[parts.length - 1])) {
+      return parts[parts.length - 1];
+    }
+  }
+  const fallback = (rawRequest.socket && rawRequest.socket.remoteAddress) || rawRequest.ip || null;
+  return typeof fallback === "string" && net.isIP(fallback) ? fallback : null;
+}
+
+function resolveCooldownUntil(old) {
+  if (!old) return 0;
+  return typeof old.cooldownUntil === "number" ? old.cooldownUntil : old.sentAt + TTL_MS;
+}
+
+function nextCooldownState(old, now) {
+  const withinWindow = old && old.windowStart + RESET_COOLDOWN_WINDOW_MS > now;
+  const sendCount = withinWindow ? (old.sendCount || 0) + 1 : 1;
+  const cooldownMs = Math.min(MAX_RESET_COOLDOWN_MS,
+      TTL_MS * Math.pow(2, Math.max(0, sendCount - 2)));
+  const attempts = old && (old.lockedUntil === 0 || old.lockedUntil <= now)
+      ? (old.lockedUntil > 0 ? 0 : (old.attempts || 0)) : 0;
+  return {
+    sendCount,
+    windowStart: withinWindow ? old.windowStart : now,
+    cooldownUntil: now + cooldownMs,
+    attempts,
+  };
+}
+
+async function invalidateChallengeIfOwned(ref, expectedSentAt) {
+  try {
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      const data = snapshot.data();
+      if (data && data.sentAt === expectedSentAt) {
+        transaction.update(ref, {expiresAt: 0, cooldownUntil: 0, hash: ""});
+      }
+    });
+  } catch (ignored) { }
+}
+
 async function limitResetRequests(request) {
-  const ip = request.rawRequest &&
-      (request.rawRequest.ip || (request.rawRequest.socket &&
-          request.rawRequest.socket.remoteAddress));
+  const ip = extractTrustedClientIp(request.rawRequest);
   if (!ip) throw new HttpsError("unavailable", "REQUEST_SOURCE_UNKNOWN");
   const ipKey = crypto.createHmac("sha256", pepper.value()).update(`ip:${ip}`).digest("hex");
   const ref = db.collection("_otpRequestLimits").doc(ipKey);
@@ -122,6 +176,7 @@ exports.sendVerificationOtp = onCall(
       maxInstances: 2}, async (request) => {
       const uid = requireUser(request);
       const user = await auth.getUser(uid);
+      if (user.disabled) throw new HttpsError("permission-denied", "ACCOUNT_DISABLED");
       if (!user.email) throw new HttpsError("failed-precondition", "EMAIL_REQUIRED");
       if (user.emailVerified) throw new HttpsError("failed-precondition", "ALREADY_VERIFIED");
       const now = Date.now();
@@ -134,19 +189,23 @@ exports.sendVerificationOtp = onCall(
           throw new HttpsError("resource-exhausted", "OTP_LOCKED",
               {retryAt: old.lockedUntil});
         }
-        if (old && old.sentAt + TTL_MS > now) {
+        const cooldownUntil = resolveCooldownUntil(old);
+        if (cooldownUntil > now) {
           throw new HttpsError("resource-exhausted", "OTP_COOLDOWN",
-              {retryAt: old.sentAt + TTL_MS});
+              {retryAt: cooldownUntil});
         }
+        const next = nextCooldownState(old, now);
         transaction.set(ref, {
           hash: hashCode(uid, code), email: user.email, sentAt: now,
-          expiresAt: now + TTL_MS, attempts: 0, lockedUntil: 0,
+          expiresAt: now + TTL_MS, cooldownUntil: next.cooldownUntil,
+          attempts: next.attempts, lockedUntil: 0,
+          sendCount: next.sendCount, windowStart: next.windowStart,
         });
       });
       try {
         await sendCodeMail(user.email, code, "verify");
       } catch (error) {
-        await ref.delete();
+        await invalidateChallengeIfOwned(ref, now);
         throw new HttpsError("unavailable", "EMAIL_SEND_FAILED");
       }
       return {expiresAt: now + TTL_MS};
@@ -175,32 +234,40 @@ exports.requestPasswordResetOtp = onCall(
       const now = Date.now();
       const result = {expiresAt: now + TTL_MS};
       let user;
+      const key = resetKey(email);
+      const ref = db.collection("_passwordResetChallenges").doc(key);
       try {
         user = await auth.getUserByEmail(email);
       } catch (error) {
-        if (error.code === "auth/user-not-found") return result;
+        if (error.code === "auth/user-not-found") {
+          await ref.get();
+          return result;
+        }
         throw error;
       }
-      const key = resetKey(email);
-      const ref = db.collection("_passwordResetChallenges").doc(key);
+      if (user.disabled) {
+        await ref.get();
+        return result;
+      }
       const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
-      const shouldSend = await db.runTransaction(async (transaction) => {
+      const sentOrCooldown = await db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(ref);
         const old = snapshot.data();
-        if (old && (old.lockedUntil > now || old.sentAt + TTL_MS > now)) return false;
-        const withinWindow = old && old.windowStart + RESET_RATE_WINDOW_MS > now;
-        const sendCount = withinWindow ? (old.sendCount || 0) + 1 : 1;
-        if (sendCount > EMAIL_RESET_LIMIT) return false;
+        if (old && (old.lockedUntil > now || resolveCooldownUntil(old) > now)) {
+          return {sent: false, expiresAt: old.expiresAt || result.expiresAt};
+        }
+        const next = nextCooldownState(old, now);
         transaction.set(ref, {uid: user.uid, email, hash: hashCode(key, code),
-          sentAt: now, expiresAt: now + TTL_MS, attempts: 0, lockedUntil: 0,
-          sendCount, windowStart: withinWindow ? old.windowStart : now});
-        return true;
+          sentAt: now, expiresAt: now + TTL_MS, cooldownUntil: next.cooldownUntil,
+          attempts: next.attempts, lockedUntil: 0,
+          sendCount: next.sendCount, windowStart: next.windowStart});
+        return {sent: true, expiresAt: result.expiresAt};
       });
-      if (!shouldSend) return result;
+      if (!sentOrCooldown.sent) return {expiresAt: sentOrCooldown.expiresAt};
       try {
         await sendCodeMail(email, code, "reset");
       } catch (error) {
-        await ref.delete();
+        await invalidateChallengeIfOwned(ref, now);
         throw new HttpsError("unavailable", "EMAIL_SEND_FAILED");
       }
       return result;
@@ -220,7 +287,10 @@ exports.completePasswordResetOtp = onCall(
       const ref = db.collection("_passwordResetChallenges").doc(key);
       const challenge = await consumeChallenge(ref, email, code, key, "NO_PENDING_RESET");
       const user = await auth.getUser(challenge.uid);
-      if (user.email !== email) throw new HttpsError("failed-precondition", "NO_PENDING_RESET");
+      if (user.disabled || typeof user.email !== "string"
+          || user.email.trim().toLowerCase() !== email) {
+        throw new HttpsError("failed-precondition", "NO_PENDING_RESET");
+      }
       await auth.updateUser(user.uid, {password, emailVerified: true});
       await auth.revokeRefreshTokens(user.uid);
       return {reset: true};
