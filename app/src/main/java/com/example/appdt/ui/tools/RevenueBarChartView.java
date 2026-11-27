@@ -78,20 +78,28 @@ public final class RevenueBarChartView extends View {
         float baseline = getHeight() - 38 * density;
         float chartHeight = Math.max(0f, baseline - top);
         float slot = getWidth() / (float) entries.size();
-        double max = 1;
-        for (RevenueCsvParser.Entry entry : entries) max = Math.max(max, entry.value);
+        double max = 0, min = 0;
+        for (RevenueCsvParser.Entry entry : entries) {
+            max = Math.max(max, entry.value);
+            min = Math.min(min, entry.value);
+        }
+        double range = max - min;
+        if (range == 0) range = 1;
+        float zero = baseline - (float) ((-min) / range * chartHeight);
+        paint.setColor(labelColor);
+        canvas.drawLine(0, zero, getWidth(), zero, paint);
         paint.setColor(accent);
         for (int i = 0; i < entries.size(); i++) {
             RevenueCsvParser.Entry entry = entries.get(i);
             float center = slot * (i + 0.5f);
             float half = Math.min(slot * 0.30f, 22 * density);
-            float height = (float) (entry.value / max * chartHeight);
-            canvas.drawRoundRect(center - half, baseline - height, center + half, baseline,
+            float valueY = baseline - (float) ((entry.value - min) / range * chartHeight);
+            canvas.drawRoundRect(center - half, Math.min(zero, valueY), center + half, Math.max(zero, valueY),
                     5 * density, 5 * density, paint);
             paint.setColor(labelColor);
             if (entries.size() <= 6) {
                 paint.setTextSize(10 * density);
-                canvas.drawText(valueLabels[i], center, baseline - height - 7 * density, paint);
+                canvas.drawText(valueLabels[i], center, Math.max(top, Math.min(zero, valueY) - 7 * density), paint);
             }
             paint.setTextSize(11 * density);
             canvas.drawText(axisLabels[i], center, baseline + 20 * density, paint);

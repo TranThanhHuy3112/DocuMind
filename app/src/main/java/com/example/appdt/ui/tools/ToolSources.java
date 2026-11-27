@@ -17,7 +17,8 @@ public final class ToolSources {
         for (DocumentModel document : documents) {
             if (!document.isReady() || DocumentPicker.isBlockedPath(document.getPath())) continue;
             String extension = DocumentCategory.canonicalExtension(document);
-            boolean spreadsheet = extension.equals("csv") || extension.equals("xlsx");
+            boolean spreadsheet = extension.equals("csv") || extension.equals("xlsx")
+                    || extension.equals("pdf") || extension.equals("docx");
             boolean media = extension.equals("mp4") || extension.equals("mov")
                     || extension.equals("mp3") || extension.equals("wav")
                     || extension.equals("m4a");

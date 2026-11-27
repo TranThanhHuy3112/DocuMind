@@ -40,6 +40,38 @@ public class OfficeTextExtractorTest {
         assertEquals(1200, RevenueCsvParser.parse(new StringReader(csv)).get(0).value, 0.001);
     }
 
+    @Test public void wordTablePreservesColumnsAndDecimalValues() throws Exception {
+        Map<String, String> parts = new LinkedHashMap<>();
+        parts.put("word/document.xml", "<w:document xmlns:w=\"urn:w\"><w:body><w:tbl>"
+                + "<w:tr><w:tc><w:p><w:r><w:t>Sản phẩm</w:t></w:r></w:p></w:tc>"
+                + "<w:tc><w:p><w:r><w:t>Giá</w:t></w:r></w:p></w:tc></w:tr>"
+                + "<w:tr><w:tc><w:p><w:r><w:t>A,B</w:t></w:r></w:p></w:tc>"
+                + "<w:tc><w:p><w:r><w:t>-0.125</w:t></w:r></w:p></w:tc></w:tr>"
+                + "</w:tbl></w:body></w:document>");
+        TabularData table = TabularData.parse(new StringReader(OfficeTextExtractor.docxTableCsv(zip(parts))));
+        assertEquals("A,B", table.rows.get(0).get(0));
+        assertEquals(-0.125, table.summarize(1, 0, TabularData.NumberStyle.DOT_DECIMAL).total.doubleValue(), 0.00001);
+    }
+
+    @Test public void mergedOrOmittedWordCellsFailInsteadOfShiftingValues() throws Exception {
+        for (String property : new String[]{"<w:gridBefore w:val=\"1\"/>", "<w:gridSpan w:val=\"2\"/>"}) {
+            Map<String, String> parts = new LinkedHashMap<>();
+            parts.put("word/document.xml", "<w:document xmlns:w=\"urn:w\"><w:body><w:tbl><w:tr>"
+                    + property + "<w:tc><w:p><w:r><w:t>10</w:t></w:r></w:p></w:tc>"
+                    + "</w:tr></w:tbl></w:body></w:document>");
+            org.junit.Assert.assertThrows(java.io.IOException.class, () -> OfficeTextExtractor.docxTableCsv(zip(parts)));
+        }
+    }
+
+    @Test public void strictExcelAnalysisDoesNotChangeAiExtractionOfMergedTitles() throws Exception {
+        Map<String, String> parts = new LinkedHashMap<>();
+        parts.put("xl/worksheets/sheet1.xml", "<worksheet><sheetData><row><c r=\"A1\" t=\"inlineStr\">"
+                + "<is><t>Title</t></is></c></row></sheetData><mergeCells><mergeCell ref=\"A1:B1\"/></mergeCells></worksheet>");
+        byte[] archive = zip(parts);
+        assertTrue(OfficeTextExtractor.xlsxCsv(archive).contains("Title"));
+        org.junit.Assert.assertThrows(java.io.IOException.class, () -> OfficeTextExtractor.xlsxAnalysisCsv(archive));
+    }
+
     private static byte[] zip(Map<String, String> parts) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (ZipOutputStream archive = new ZipOutputStream(output)) {
