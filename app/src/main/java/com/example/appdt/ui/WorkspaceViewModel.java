@@ -178,12 +178,9 @@ public class WorkspaceViewModel extends ViewModel {
             }
             if (Thread.currentThread().isInterrupted()) return;
             if (lastProgress < 90) postProgress(id, 90);
-            Thread.sleep(250);
             if (!Thread.currentThread().isInterrupted()) postProgress(id, 100);
         } catch (IOException | SecurityException error) {
             mainHandler.post(() -> repository.markFailed(id));
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
         } finally {
             documentJobs.remove(id);
         }

@@ -77,8 +77,9 @@ public class DocumentToolsTest {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         File csv = File.createTempFile("documind-revenue-", ".csv", context.getCacheDir());
         try (FileOutputStream output = new FileOutputStream(csv)) {
-            output.write("month,revenue\nJanuary,1200\nFebruary,1450\n"
-                    .getBytes(StandardCharsets.UTF_8));
+            StringBuilder data = new StringBuilder("Sản phẩm,Chi phí,Số lượng\n");
+            for (int i = 0; i < 15; i++) data.append("A,100,2\n");
+            output.write(data.toString().getBytes(StandardCharsets.UTF_8));
         }
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             Assume.assumeFalse(hasReady(scenario, ToolKind.ANALYZE));
@@ -90,7 +91,7 @@ public class DocumentToolsTest {
             for (int attempt = 0; attempt < 30; attempt++) {
                 try {
                     onView(withId(R.id.analysis_chart)).inRoot(isDialog())
-                            .check(matches(isDisplayed()));
+                            .perform(androidx.test.espresso.action.ViewActions.scrollTo()).check(matches(isDisplayed()));
                     chartVisible = true;
                     break;
                 } catch (androidx.test.espresso.NoMatchingViewException ignored) {
@@ -98,6 +99,13 @@ public class DocumentToolsTest {
                 }
             }
             assertTrue("CSV revenue chart should appear", chartVisible);
+            onView(withId(R.id.analysis_value_column)).inRoot(isDialog())
+                    .perform(androidx.test.espresso.action.ViewActions.scrollTo(), click());
+            androidx.test.espresso.Espresso.onData(org.hamcrest.Matchers.is("Chi phí"))
+                    .inRoot(androidx.test.espresso.matcher.RootMatchers.isPlatformPopup()).perform(click());
+            assertAnalysisTotal("Tổng: 1.500");
+            scenario.recreate();
+            assertAnalysisTotal("Tổng: 1.500");
             close(scenario);
         } finally {
             csv.delete();
@@ -150,6 +158,17 @@ public class DocumentToolsTest {
                     .check(matches(isDisplayed()));
             close(scenario);
         }
+    }
+
+    private static void assertAnalysisTotal(String expected) throws Exception {
+        for (int attempt = 0; attempt < 40; attempt++) {
+            try {
+                onView(withText(containsString(expected))).inRoot(isDialog())
+                        .perform(androidx.test.espresso.action.ViewActions.scrollTo()).check(matches(isDisplayed()));
+                return;
+            } catch (androidx.test.espresso.NoMatchingViewException ignored) { Thread.sleep(50); }
+        }
+        throw new AssertionError("Expected analysis total: " + expected);
     }
 
     private void addReady(ActivityScenario<MainActivity> scenario, String id,

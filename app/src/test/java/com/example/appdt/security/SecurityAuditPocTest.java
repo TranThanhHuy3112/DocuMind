@@ -7,7 +7,7 @@ import com.example.appdt.model.PostModel;
 import com.example.appdt.model.ToolKind;
 import com.example.appdt.repository.AuthRepository;
 import com.example.appdt.repository.SecurePrefs;
-import com.example.appdt.ui.tools.RevenueCsvParser;
+import com.example.appdt.ui.tools.TabularData;
 import com.example.appdt.ui.tools.ToolSources;
 import com.example.appdt.utils.DocumentPicker;
 
@@ -20,7 +20,6 @@ import java.io.StringReader;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -73,7 +72,7 @@ public class SecurityAuditPocTest {
 
     @Test
     public void verified_sec002_csvParserBoundsLineAndRowScan() throws IOException {
-        // Part 1: 100,000 invalid rows after a valid header must stop at MAX_ROWS_SCANNED (10,000).
+        // The active table parser must reject oversize data without returning partial totals.
         int invalidRows = 100_000;
         String header = "month,revenue\n";
         String invalidRow = "Jan,invalid\n";
@@ -84,9 +83,7 @@ public class SecurityAuditPocTest {
         }
 
         TrackingReader rowScanReader = new TrackingReader(new StringReader(csvBuilder.toString()));
-        List<RevenueCsvParser.Entry> parsedRows = RevenueCsvParser.parse(rowScanReader);
-
-        assertTrue(parsedRows.isEmpty());
+        org.junit.Assert.assertThrows(IOException.class, () -> TabularData.parse(rowScanReader));
         assertTrue("Expected row scan to stop well before 100,000 lines, got: " + rowScanReader.getNewlinesRead(),
                 rowScanReader.getNewlinesRead() <= 11_000L);
 
@@ -101,7 +98,7 @@ public class SecurityAuditPocTest {
         TrackingReader hugeLineReader = new TrackingReader(new StringReader(hugeLine.toString()));
         boolean rejected = false;
         try {
-            RevenueCsvParser.parse(hugeLineReader);
+            TabularData.parse(hugeLineReader);
         } catch (IOException expected) {
             rejected = true;
         }

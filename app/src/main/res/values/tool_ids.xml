@@ -4,6 +4,7 @@
     <item name="chat_messages" type="id" />
     <item name="analysis_chart" type="id" />
     <item name="analysis_summary" type="id" />
+    <item name="analysis_value_column" type="id" />
     <item name="transcript_copy" type="id" />
     <item name="transcript_text" type="id" />
     <item name="compare_result" type="id" />

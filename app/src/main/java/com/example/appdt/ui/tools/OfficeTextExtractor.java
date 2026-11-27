@@ -18,6 +18,7 @@ import java.util.zip.ZipInputStream;
 /** Extracts readable text from Office Open XML files without uploading the binary package. */
 final class OfficeTextExtractor {
     private static final int MAX_XML_BYTES = 8 * 1024 * 1024;
+    private static final int MAX_ZIP_ENTRIES = 1024;
     private static final int MAX_SHARED_STRINGS = 100_000;
     private static final int MAX_EXCEL_COLUMN_INDEX = 16_383; // XFD
 
@@ -32,9 +33,12 @@ final class OfficeTextExtractor {
             XmlPullParser parser = xml(body);
             int event;
             while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+                checkInterrupted();
                 if (event != XmlPullParser.START_TAG) continue;
                 if (parser.getName().equals("p") && text.length() > 0) text.append('\n');
                 if (parser.getName().equals("t")) text.append(parser.nextText());
+                if (parser.getName().equals("br") || parser.getName().equals("cr")) text.append('\n');
+                if (parser.getName().equals("tab")) text.append('\t');
                 if (text.length() > MAX_XML_BYTES) throw new IOException("Nội dung DOCX quá dài.");
             }
         } catch (XmlPullParserException error) {
@@ -43,7 +47,67 @@ final class OfficeTextExtractor {
         return text.toString();
     }
 
+    /** Extract the first Word table, keeping cell boundaries and never executing field codes. */
+    static String docxTableCsv(byte[] archive) throws IOException {
+        byte[] body = entries(archive).get("word/document.xml");
+        if (body == null) throw new IOException("Tệp DOCX không có nội dung.");
+        StringBuilder csv = new StringBuilder();
+        StringBuilder cell = null;
+        List<String> row = new ArrayList<>();
+        int depth = 0, rowCount = 0;
+        try {
+            XmlPullParser parser = xml(body);
+            int event;
+            while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+                checkInterrupted();
+                String tag = parser.getName();
+                if (event == XmlPullParser.START_TAG) {
+                    if ("tbl".equals(tag)) {
+                        if (++depth > 1) throw new IOException("Bảng Word lồng nhau chưa được hỗ trợ; hãy xuất bảng thành CSV.");
+                    } else if (depth == 1 && "tr".equals(tag)) row.clear();
+                    else if (depth == 1 && "tc".equals(tag)) cell = new StringBuilder();
+                    else if (depth == 1 && "p".equals(tag) && cell != null && cell.length() > 0) cell.append('\n');
+                    else if (depth == 1 && "t".equals(tag) && cell != null) {
+                        cell.append(parser.nextText());
+                    } else if (depth == 1 && ("br".equals(tag) || "cr".equals(tag)) && cell != null) {
+                        cell.append('\n');
+                    } else if (depth == 1 && "tab".equals(tag) && cell != null) {
+                        cell.append('\t');
+                    } else if (depth == 1 && ("gridSpan".equals(tag) || "vMerge".equals(tag)
+                            || "gridBefore".equals(tag) || "gridAfter".equals(tag))) {
+                        throw new IOException("Bảng Word có ô gộp; hãy tách ô hoặc xuất thành CSV để giữ đúng cột.");
+                    }
+                    if (cell != null && cell.length() > 64 * 1024) throw new IOException("Ô Word vượt 64 KB.");
+                } else if (event == XmlPullParser.END_TAG) {
+                    if ("tbl".equals(tag) && depth == 1) return csv.toString();
+                    if (depth != 1) continue;
+                    if ("tc".equals(tag) && cell != null) {
+                        row.add(cell.toString()); cell = null;
+                        if (row.size() > 256) throw new IOException("Bảng Word vượt 256 cột.");
+                    } else if ("tr".equals(tag)) {
+                        if (++rowCount > 10_001) throw new IOException("Bảng Word vượt 10.000 dòng dữ liệu.");
+                        if (csv.length() > 0) csv.append('\n');
+                        for (int i = 0; i < row.size(); i++) {
+                            if (i > 0) csv.append(',');
+                            csv.append(quote(row.get(i)));
+                            if (csv.length() > MAX_XML_BYTES) throw new IOException("Bảng Word quá lớn.");
+                        }
+                    }
+                }
+            }
+        } catch (XmlPullParserException error) { throw new IOException("Không thể đọc bảng Word.", error); }
+        throw new IOException("Không tìm thấy bảng trong Word. Hãy chèn bảng hoặc xuất dữ liệu thành CSV.");
+    }
+
     static String xlsxCsv(byte[] archive) throws IOException {
+        return xlsxCsv(archive, false);
+    }
+
+    static String xlsxAnalysisCsv(byte[] archive) throws IOException {
+        return xlsxCsv(archive, true);
+    }
+
+    private static String xlsxCsv(byte[] archive, boolean strictTable) throws IOException {
         Map<String, byte[]> parts = entries(archive);
         byte[] sheet = parts.get("xl/worksheets/sheet1.xml");
         if (sheet == null) {
@@ -67,17 +131,23 @@ final class OfficeTextExtractor {
             int column = -1;
             int maxColumn = -1;
             boolean sharedCell = false;
+            boolean booleanCell = false;
             StringBuilder cellText = null;
             int event;
             while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+                checkInterrupted();
                 if (event == XmlPullParser.START_TAG) {
                     String name = parser.getName();
-                    if (name.equals("row")) {
+                    if (strictTable && name.equals("mergeCell")) {
+                        throw new IOException("Bảng Excel có ô gộp; hãy tách ô trước khi phân tích.");
+                    } else if (name.equals("row")) {
                         row.clear(); maxColumn = -1; column = -1; cellText = null;
                     } else if (name.equals("c")) {
                         String ref = parser.getAttributeValue(null, "r");
                         column = ref != null ? columnIndex(ref) : (column + 1);
+                        if (strictTable && column > 255) throw new IOException("Bảng Excel vượt 256 cột.");
                         sharedCell = "s".equals(parser.getAttributeValue(null, "t"));
+                        booleanCell = strictTable && "b".equals(parser.getAttributeValue(null, "t"));
                         cellText = new StringBuilder();
                     } else if ((name.equals("v") || name.equals("t")) && column >= 0 && cellText != null) {
                         String value = parser.nextText();
@@ -86,6 +156,9 @@ final class OfficeTextExtractor {
                                 int index = Integer.parseInt(value);
                                 value = index >= 0 && index < shared.size() ? shared.get(index) : "";
                             } catch (NumberFormatException ignored) { value = ""; }
+                        }
+                        if (booleanCell && name.equals("v")) {
+                            value = "1".equals(value) ? "TRUE" : "0".equals(value) ? "FALSE" : "";
                         }
                         cellText.append(value);
                     }
@@ -104,7 +177,7 @@ final class OfficeTextExtractor {
                             }
                             csv.append('\n');
                         }
-                        for (int i = 0; i <= Math.min(maxColumn, 100); i++) {
+                        for (int i = 0; i <= (strictTable ? maxColumn : Math.min(maxColumn, 100)); i++) {
                             String cell = quote(row.getOrDefault(i, ""));
                             int separator = i > 0 ? 1 : 0;
                             if (csv.length() + separator + cell.length() > MAX_XML_BYTES) {
@@ -131,6 +204,7 @@ final class OfficeTextExtractor {
             StringBuilder item = null;
             int event;
             while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+                checkInterrupted();
                 if (event == XmlPullParser.START_TAG && parser.getName().equals("si")) {
                     if (values.size() >= MAX_SHARED_STRINGS) {
                         throw new IOException("Tệp XLSX có quá nhiều chuỗi.");
@@ -158,26 +232,34 @@ final class OfficeTextExtractor {
     private static Map<String, byte[]> entries(byte[] archive) throws IOException {
         Map<String, byte[]> result = new HashMap<>();
         int total = 0;
+        int entryCount = 0;
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
             ZipEntry entry;
+            byte[] buffer = new byte[8192];
             while ((entry = zip.getNextEntry()) != null) {
+                checkInterrupted();
+                if (++entryCount > MAX_ZIP_ENTRIES) throw new IOException("Tệp Office có quá nhiều thành phần.");
                 String name = entry.getName();
-                if (!name.equals("word/document.xml") && !name.equals("xl/sharedStrings.xml")
-                        && !name.matches("xl/worksheets/sheet[0-9]+\\.xml")) continue;
-                ByteArrayOutputStream output = new ByteArrayOutputStream();
-                byte[] buffer = new byte[8192];
+                boolean selected = name.equals("word/document.xml") || name.equals("xl/sharedStrings.xml")
+                        || name.matches("xl/worksheets/sheet[0-9]+\\.xml");
+                ByteArrayOutputStream output = selected ? new ByteArrayOutputStream() : null;
                 int count;
                 while ((count = zip.read(buffer)) != -1) {
-                    if (output.size() + count > MAX_XML_BYTES
-                            || total + output.size() + count > MAX_XML_BYTES * 2)
+                    checkInterrupted();
+                    if (total + count > MAX_XML_BYTES * 2
+                            || selected && output.size() + count > MAX_XML_BYTES)
                         throw new IOException("Nội dung Office quá lớn.");
-                    output.write(buffer, 0, count);
+                    total += count;
+                    if (selected) output.write(buffer, 0, count);
                 }
-                result.put(name, output.toByteArray());
-                total += output.size();
+                if (selected) result.put(name, output.toByteArray());
             }
         }
         return result;
+    }
+
+    private static void checkInterrupted() throws IOException {
+        if (Thread.currentThread().isInterrupted()) throw new IOException("Đã hủy đọc tệp Office.");
     }
 
     private static XmlPullParser xml(byte[] bytes) throws XmlPullParserException {
@@ -202,7 +284,7 @@ final class OfficeTextExtractor {
     }
 
     private static String quote(String value) {
-        if (value.indexOf(',') < 0 && value.indexOf('"') < 0 && value.indexOf('\n') < 0)
+        if (value.indexOf(',') < 0 && value.indexOf('"') < 0 && value.indexOf('\n') < 0 && value.indexOf('\r') < 0)
             return value;
         return '"' + value.replace("\"", "\"\"") + '"';
     }

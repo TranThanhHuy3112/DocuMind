@@ -50,7 +50,6 @@ public final class CommunityRepository {
         listenerEpoch++;
         activeUid = uid;
         localData = LocalDataStore.forAccount(context, uid);
-        List<PostModel> saved = localData.loadPosts();
         FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
         if (!AuthRepository.usesLocalTestStore() && user != null
                 && uid.equals(user.getUid()) && user.isEmailVerified()) {
@@ -64,6 +63,7 @@ public final class CommunityRepository {
             });
         } else {
             loading = false;
+            List<PostModel> saved = localData.loadPosts();
             posts.setValue(saved == null ? initialPosts() : saved);
         }
     }
