@@ -44,7 +44,7 @@ public final class SettingsRepository {
     }
 
     public void setAccent(AccentColor accent) {
-        preferences.edit().putString("accent", accent.name()).commit();
+        preferences.edit().putString("accent", accent.name()).apply();
     }
 
     public int getNightMode() {
@@ -56,7 +56,7 @@ public final class SettingsRepository {
     }
 
     public void setNightMode(int mode) {
-        preferences.edit().putInt("night_mode", mode).commit();
+        preferences.edit().putInt("night_mode", mode).apply();
     }
 
     public DisplayDensity getDisplayDensity() {
@@ -69,6 +69,6 @@ public final class SettingsRepository {
     }
 
     public void setDisplayDensity(DisplayDensity density) {
-        preferences.edit().putString("display_density", density.name()).commit();
+        preferences.edit().putString("display_density", density.name()).apply();
     }
 }

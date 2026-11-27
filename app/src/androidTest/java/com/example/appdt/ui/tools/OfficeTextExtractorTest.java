@@ -37,7 +37,8 @@ public class OfficeTextExtractorTest {
                 + "</sheetData></worksheet>");
         String csv = OfficeTextExtractor.xlsxCsv(zip(parts));
         assertTrue(csv.contains("month,revenue"));
-        assertEquals(1200, RevenueCsvParser.parse(new StringReader(csv)).get(0).value, 0.001);
+        assertEquals(1200, TabularData.parse(new StringReader(csv))
+                .summarize(1, 0, TabularData.NumberStyle.DOT_DECIMAL).total.doubleValue(), 0.001);
     }
 
     @Test public void wordTablePreservesColumnsAndDecimalValues() throws Exception {
@@ -70,6 +71,76 @@ public class OfficeTextExtractorTest {
         byte[] archive = zip(parts);
         assertTrue(OfficeTextExtractor.xlsxCsv(archive).contains("Title"));
         org.junit.Assert.assertThrows(java.io.IOException.class, () -> OfficeTextExtractor.xlsxAnalysisCsv(archive));
+    }
+
+    @Test public void ignoredZipPartsCannotBypassInflationOrEntryCountBounds() throws Exception {
+        byte[] oversized = zipWithIgnoredParts(17 * 1024 * 1024, 0);
+        assertTrue("Highly compressible test file must fit upload bound", oversized.length < 10 * 1024 * 1024);
+        org.junit.Assert.assertThrows(java.io.IOException.class, () -> OfficeTextExtractor.docx(oversized));
+        byte[] tooMany = zipWithIgnoredParts(0, 1025);
+        org.junit.Assert.assertThrows(java.io.IOException.class, () -> OfficeTextExtractor.docx(tooMany));
+        assertEquals("OK", OfficeTextExtractor.docx(zipWithIgnoredParts(1024, 2)));
+    }
+
+    @Test public void interruptedOfficeReadStopsWithoutClearingInterruptFlag() throws Exception {
+        byte[] archive = zipWithIgnoredParts(1024, 0);
+        try {
+            Thread.currentThread().interrupt();
+            org.junit.Assert.assertThrows(java.io.IOException.class, () -> OfficeTextExtractor.docx(archive));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally { Thread.interrupted(); }
+    }
+
+    @Test public void inlineWordBreaksAndTabsDoNotBecomeWrongNumericValues() throws Exception {
+        String[] tags = {"br", "cr", "tab"};
+        String[] separators = {"\n", "\n", "\t"};
+        for (int i = 0; i < tags.length; i++) {
+            Map<String, String> parts = new LinkedHashMap<>();
+            parts.put("word/document.xml", "<w:document xmlns:w=\"urn:w\"><w:body><w:tbl>"
+                    + "<w:tr><w:tc><w:p><w:r><w:t>Value</w:t></w:r></w:p></w:tc></w:tr>"
+                    + "<w:tr><w:tc><w:p><w:r><w:t>12</w:t><w:" + tags[i] + "/>"
+                    + "<w:t>34</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>");
+            byte[] archive = zip(parts);
+            TabularData data = TabularData.parse(new StringReader(OfficeTextExtractor.docxTableCsv(archive)));
+            assertEquals("12" + separators[i] + "34", data.rows.get(0).get(0));
+            assertEquals(0, data.summarize(0, 0, TabularData.NumberStyle.DOT_DECIMAL).count);
+            assertTrue(OfficeTextExtractor.docx(archive).contains("12" + separators[i] + "34"));
+        }
+    }
+
+    @Test public void spreadsheetBooleansStayNonnumericInAnalysis() throws Exception {
+        Map<String, String> parts = new LinkedHashMap<>();
+        parts.put("xl/worksheets/sheet1.xml", "<worksheet><sheetData>"
+                + "<row><c r=\"A1\" t=\"inlineStr\"><is><t>Enabled</t></is></c></row>"
+                + "<row><c r=\"A2\" t=\"b\"><v>1</v></c></row>"
+                + "<row><c r=\"A3\" t=\"b\"><v>0</v></c></row>"
+                + "</sheetData></worksheet>");
+        byte[] archive = zip(parts);
+        TabularData data = TabularData.parse(new StringReader(OfficeTextExtractor.xlsxAnalysisCsv(archive)));
+        assertEquals("TRUE", data.rows.get(0).get(0));
+        assertEquals("FALSE", data.rows.get(1).get(0));
+        assertEquals(0, data.summarize(0, 0, TabularData.NumberStyle.DOT_DECIMAL).count);
+        assertTrue("Existing AI extraction behavior remains compatible", OfficeTextExtractor.xlsxCsv(archive).contains("\n1\n0"));
+    }
+
+    private static byte[] zipWithIgnoredParts(int ignoredBytes, int emptyEntries) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream archive = new ZipOutputStream(output)) {
+            archive.putNextEntry(new ZipEntry("unused/padding.bin"));
+            byte[] zeros = new byte[8192];
+            for (int remaining = ignoredBytes; remaining > 0; remaining -= Math.min(remaining, zeros.length)) {
+                archive.write(zeros, 0, Math.min(remaining, zeros.length));
+            }
+            archive.closeEntry();
+            for (int i = 0; i < emptyEntries; i++) {
+                archive.putNextEntry(new ZipEntry("unused/" + i)); archive.closeEntry();
+            }
+            archive.putNextEntry(new ZipEntry("word/document.xml"));
+            archive.write("<w:document xmlns:w=\"urn:w\"><w:body><w:p><w:r><w:t>OK</w:t></w:r></w:p></w:body></w:document>"
+                    .getBytes(StandardCharsets.UTF_8));
+            archive.closeEntry();
+        }
+        return output.toByteArray();
     }
 
     private static byte[] zip(Map<String, String> parts) throws Exception {

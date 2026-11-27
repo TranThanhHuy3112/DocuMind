@@ -19,7 +19,7 @@ import java.util.Locale;
 public final class RevenueBarChartView extends View {
     private static final Locale VI_LOCALE = Locale.forLanguageTag("vi-VN");
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private List<RevenueCsvParser.Entry> entries = new ArrayList<>();
+    private List<TabularData.ChartEntry> entries = new ArrayList<>();
     private String[] valueLabels = new String[0];
     private String[] axisLabels = new String[0];
     private final float density;
@@ -39,7 +39,7 @@ public final class RevenueBarChartView extends View {
         setMinimumHeight((int) (210 * density));
     }
 
-    public void setEntries(List<RevenueCsvParser.Entry> values) {
+    public void setEntries(List<TabularData.ChartEntry> values) {
         entries = new ArrayList<>(values);
         valueLabels = new String[entries.size()];
         axisLabels = new String[entries.size()];
@@ -47,7 +47,7 @@ public final class RevenueBarChartView extends View {
         numberFormat.setMaximumFractionDigits(0);
         StringBuilder description = new StringBuilder();
         for (int i = 0; i < entries.size(); i++) {
-            RevenueCsvParser.Entry entry = entries.get(i);
+            TabularData.ChartEntry entry = entries.get(i);
             valueLabels[i] = formatCompact(entry.value, numberFormat);
             axisLabels[i] = entry.label.length() > 8
                     ? entry.label.substring(0, 7) + "…" : entry.label;
@@ -79,7 +79,7 @@ public final class RevenueBarChartView extends View {
         float chartHeight = Math.max(0f, baseline - top);
         float slot = getWidth() / (float) entries.size();
         double max = 0, min = 0;
-        for (RevenueCsvParser.Entry entry : entries) {
+        for (TabularData.ChartEntry entry : entries) {
             max = Math.max(max, entry.value);
             min = Math.min(min, entry.value);
         }
@@ -90,7 +90,7 @@ public final class RevenueBarChartView extends View {
         canvas.drawLine(0, zero, getWidth(), zero, paint);
         paint.setColor(accent);
         for (int i = 0; i < entries.size(); i++) {
-            RevenueCsvParser.Entry entry = entries.get(i);
+            TabularData.ChartEntry entry = entries.get(i);
             float center = slot * (i + 0.5f);
             float half = Math.min(slot * 0.30f, 22 * density);
             float valueY = baseline - (float) ((entry.value - min) / range * chartHeight);

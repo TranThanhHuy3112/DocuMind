@@ -33,6 +33,9 @@ public class AnalysisViewModelTest {
             main(() -> {
                 assertNotNull(model.statistics().getValue());
                 assertEquals(5.0, model.statistics().getValue().total.doubleValue(), 0.0001);
+                TabularData.Statistics existing = model.statistics().getValue();
+                model.summarize(model.state().getValue().table);
+                assertSame("Same selection keeps the already-computed statistics", existing, model.statistics().getValue());
                 model.editPdfPreview("Tên,Chi phí\nA,999\n");
                 assertNull(model.state().getValue().table);
                 assertNull(model.statistics().getValue());

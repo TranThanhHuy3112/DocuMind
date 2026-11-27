@@ -28,6 +28,13 @@ public class TabularDataTest {
         assertEquals(3, stats.count); assertEquals(2, stats.skipped);
         assertEquals(new BigDecimal("10"), stats.total); assertEquals(new BigDecimal("-10"), stats.min);
     }
+    @Test public void vietnameseCurrencyRowsAndQuotedLabelsUseTheActiveParser() throws Exception {
+        TabularData data = table("\uFEFFtháng;Giá trị\n\"Một; quý đầu\";1.200,50 ₫\nHai;2.000\nBa;300.000 VNĐ\nBốn;400.000Đ\n");
+        TabularData.Statistics stats = data.summarize(1, 0, TabularData.NumberStyle.COMMA_DECIMAL);
+        assertEquals(4, stats.count);
+        assertEquals("Một; quý đầu", stats.chart.get(0).label);
+        assertEquals(0, new BigDecimal("703200.50").compareTo(stats.total));
+    }
     @Test public void quotedMultilineAndEscapedQuotesPreserveCellBoundaries() throws Exception {
         TabularData data = table("\uFEFFTên,Giá\r\n\"Hàng, \"\"mới\"\"\nA\",1.25\r\n");
         assertEquals("Tên", data.headers.get(0)); assertEquals("Hàng, \"mới\"\nA", data.rows.get(0).get(0));

@@ -36,6 +36,8 @@ public final class AnalysisViewModel extends AndroidViewModel {
     private long summaryGeneration;
     private long generation;
     private String sourceId;
+    private TabularData summaryTable;
+    private int summaryValueColumn, summaryLabelColumn, summaryNumberStyle;
     int valueColumn = -1, labelColumn, numberStyle;
     String pdfPreview = "";
     public AnalysisViewModel(@NonNull Application app) { super(app); }
@@ -43,6 +45,10 @@ public final class AnalysisViewModel extends AndroidViewModel {
     LiveData<TabularData.Statistics> statistics() { return statistics; }
 
     void summarize(TabularData table) {
+        if (table == summaryTable && valueColumn == summaryValueColumn
+                && labelColumn == summaryLabelColumn && numberStyle == summaryNumberStyle) return;
+        summaryTable = table; summaryValueColumn = valueColumn;
+        summaryLabelColumn = labelColumn; summaryNumberStyle = numberStyle;
         long request = ++summaryGeneration;
         if (summaryTask != null) summaryTask.cancel(true);
         statistics.setValue(null);
@@ -100,6 +106,7 @@ public final class AnalysisViewModel extends AndroidViewModel {
     private void deliver(long request, State result) { main.post(() -> { if (request == generation) state.setValue(result); }); }
     private void cancel() {
         generation++; summaryGeneration++;
+        summaryTable = null;
         if (pending != null) pending.cancel(true);
         if (summaryTask != null) summaryTask.cancel(true);
         statistics.setValue(null);

@@ -8,20 +8,34 @@ import java.math.MathContext;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /** Bounded table import and deterministic statistics; never evaluates cell formulas. */
 public final class TabularData {
+    public static final class ChartEntry {
+        public final String label;
+        public final double value;
+        ChartEntry(String label, double value) { this.label = label; this.value = value; }
+    }
     public enum NumberStyle { DOT_DECIMAL, COMMA_DECIMAL }
     private static final int MAX_ROWS = 10_000;
     private static final int MAX_COLUMNS = 256;
     private static final int MAX_RECORD = 64 * 1024;
     private static final int MAX_CHARS = 8 * 1024 * 1024;
+    private static final Pattern CURRENCY_PREFIX = Pattern.compile("(?i)^(VND|VNĐ|[₫$€])\\s*");
+    private static final Pattern CURRENCY_SUFFIX = Pattern.compile("(?i)\\s*(VND|VNĐ|[₫đĐ$€])$");
+    private static final Pattern DOT_NUMBER = numberPattern(",", "\\.");
+    private static final Pattern COMMA_NUMBER = numberPattern("\\.", ",");
     public final List<String> headers;
     public final List<List<String>> rows;
 
     private TabularData(List<String> headers, List<List<String>> rows) {
         this.headers = Collections.unmodifiableList(headers);
         this.rows = Collections.unmodifiableList(rows);
+    }
+
+    private static Pattern numberPattern(String group, String decimal) {
+        return Pattern.compile("[+-]?(?:[0-9]+|[0-9]{1,3}(?:" + group + "[0-9]{3})+)(?:" + decimal + "[0-9]+)?(?:[eE][+-]?[0-9]{1,3})?");
     }
 
     public static TabularData parse(Reader source) throws IOException {
@@ -113,13 +127,12 @@ public final class TabularData {
     public static BigDecimal number(String raw, NumberStyle style) {
         if (raw.length() > 256) return null;
         String value = raw.trim().replace('\u2212', '-').replace('\u00A0', ' ');
-        value = value.replaceFirst("(?i)^(VND|VNĐ|[₫$€])\\s*", "")
-                .replaceFirst("(?i)\\s*(VND|VNĐ|[₫đĐ$€])$", "").trim();
+        value = CURRENCY_PREFIX.matcher(value).replaceFirst("");
+        value = CURRENCY_SUFFIX.matcher(value).replaceFirst("").trim();
         boolean parentheses = value.startsWith("(") && value.endsWith(")");
         if (parentheses) value = value.substring(1, value.length() - 1);
-        String group = style == NumberStyle.DOT_DECIMAL ? "," : "\\.";
-        String decimal = style == NumberStyle.DOT_DECIMAL ? "\\." : ",";
-        if (!value.matches("[+-]?(?:[0-9]+|[0-9]{1,3}(?:" + group + "[0-9]{3})+)(?:" + decimal + "[0-9]+)?(?:[eE][+-]?[0-9]{1,3})?")) return null;
+        Pattern number = style == NumberStyle.DOT_DECIMAL ? DOT_NUMBER : COMMA_NUMBER;
+        if (!number.matcher(value).matches()) return null;
         if (parentheses && (value.startsWith("-") || value.startsWith("+"))) return null;
         value = style == NumberStyle.DOT_DECIMAL ? value.replace(",", "") : value.replace(".", "").replace(',', '.');
         try {
@@ -142,7 +155,7 @@ public final class TabularData {
             if (stats.chart.size() < 12) {
                 String label = rows.get(i).get(labelColumn).trim();
                 if (label.isEmpty()) label = "Dòng " + (i + 2);
-                stats.chart.add(new RevenueCsvParser.Entry(label, value.doubleValue()));
+                stats.chart.add(new ChartEntry(label, value.doubleValue()));
             }
         }
         return stats;
@@ -153,7 +166,7 @@ public final class TabularData {
         public int count, skipped;
         public BigDecimal total = BigDecimal.ZERO;
         public BigDecimal min, max;
-        public final List<RevenueCsvParser.Entry> chart = new ArrayList<>();
+        public final List<ChartEntry> chart = new ArrayList<>();
         Statistics(int rows) { rowCount = rows; }
         public BigDecimal mean() { return count == 0 ? BigDecimal.ZERO : total.divide(BigDecimal.valueOf(count), MathContext.DECIMAL128); }
     }

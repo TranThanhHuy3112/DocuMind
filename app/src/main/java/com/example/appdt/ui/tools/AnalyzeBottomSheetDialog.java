@@ -144,6 +144,7 @@ public final class AnalyzeBottomSheetDialog extends ToolSheet {
         if (binding == null) return;
         resultPanel = results;
         model.summarize(table);
+        showStatistics(model.statistics().getValue());
     }
 
     private void showStatistics(TabularData.Statistics stats) {
